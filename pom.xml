@@ -1,0 +1,133 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<project xmlns="http://maven.apache.org/POM/4.0.0"
+         xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+         xsi:schemaLocation="http://maven.apache.org/POM/4.0.0 https://maven.apache.org/xsd/maven-4.0.0.xsd">
+  <modelVersion>4.0.0</modelVersion>
+
+  <groupId>com.hysx</groupId>
+  <artifactId>salvosequence-gdx</artifactId>
+  <version>1.0-SNAPSHOT</version>
+  <name>salvosequence-gdx</name>
+  <description>齐射序列 Salvo Sequence —— libGDX 移植版（原 JavaFX Canvas 渲染，逻辑与像素管线 1:1 保留）</description>
+
+  <properties>
+    <project.build.sourceEncoding>UTF-8</project.build.sourceEncoding>
+    <project.reporting.outputEncoding>UTF-8</project.reporting.outputEncoding>
+    <java.version>21</java.version>
+    <maven.compiler.release>${java.version}</maven.compiler.release>
+    <gdx.version>1.13.1</gdx.version>
+    <junit.version>5.10.2</junit.version>
+  </properties>
+
+  <dependencies>
+    <!-- libGDX 核心：渲染/输入/生命周期由 Lwjgl3 后端提供；
+         游戏本体仍然画进自己的 640x360 CPU 像素缓冲（PixelArt），
+         libGDX 只负责把整张缓冲当纹理贴上屏。 -->
+    <dependency>
+      <groupId>com.badlogicgames.gdx</groupId>
+      <artifactId>gdx</artifactId>
+      <version>${gdx.version}</version>
+    </dependency>
+    <!-- 桌面后端（LWJGL3）：窗口、OpenGL、键鼠输入 -->
+    <dependency>
+      <groupId>com.badlogicgames.gdx</groupId>
+      <artifactId>gdx-backend-lwjgl3</artifactId>
+      <version>${gdx.version}</version>
+    </dependency>
+    <!-- 各平台原生库（Windows/macOS/Linux），打包进 fat jar 后开箱即用 -->
+    <dependency>
+      <groupId>com.badlogicgames.gdx</groupId>
+      <artifactId>gdx-platform</artifactId>
+      <version>${gdx.version}</version>
+      <classifier>natives-desktop</classifier>
+    </dependency>
+    <!-- gdx-vfx：开源后处理链（Apache 2.0，基于 libgdx-contribs-postprocessing）。
+         BLOOM 画质风格用它的高斯多 pass BloomEffect（阈值->模糊->原画合成），
+         替代手写的单 pass 近似。 -->
+    <dependency>
+      <groupId>com.crashinvaders.vfx</groupId>
+      <artifactId>gdx-vfx-core</artifactId>
+      <version>0.5.5</version>
+    </dependency>
+    <dependency>
+      <groupId>com.crashinvaders.vfx</groupId>
+      <artifactId>gdx-vfx-effects</artifactId>
+      <version>0.5.5</version>
+    </dependency>
+
+    <dependency>
+      <groupId>org.junit.jupiter</groupId>
+      <artifactId>junit-jupiter-api</artifactId>
+      <version>${junit.version}</version>
+      <scope>test</scope>
+    </dependency>
+    <dependency>
+      <groupId>org.junit.jupiter</groupId>
+      <artifactId>junit-jupiter-engine</artifactId>
+      <version>${junit.version}</version>
+      <scope>test</scope>
+    </dependency>
+  </dependencies>
+
+  <build>
+    <plugins>
+      <plugin>
+        <groupId>org.apache.maven.plugins</groupId>
+        <artifactId>maven-compiler-plugin</artifactId>
+        <version>3.13.0</version>
+        <configuration>
+          <release>${java.version}</release>
+          <encoding>${project.build.sourceEncoding}</encoding>
+        </configuration>
+      </plugin>
+
+      <!-- 运行入口：mainClass 不在这里写死，否则会挡掉命令行 -Dexec.mainClass 覆盖。
+           游戏本体： mvn compile exec:java -Dexec.mainClass=com.hysx.salvosequence.PixelHudApp
+           各审计/探针工具同理换 mainClass（见 tools/ 各类头注释）。 -->
+      <plugin>
+        <groupId>org.codehaus.mojo</groupId>
+        <artifactId>exec-maven-plugin</artifactId>
+        <version>3.2.0</version>
+      </plugin>
+
+      <!-- 可执行 fat jar（含原生库）：mvn -Ppackage-jar package 后 target/ 下有独立 jar -->
+      <plugin>
+        <groupId>org.apache.maven.plugins</groupId>
+        <artifactId>maven-shade-plugin</artifactId>
+        <version>3.6.0</version>
+        <executions>
+          <execution>
+            <phase>package</phase>
+            <goals>
+              <goal>shade</goal>
+            </goals>
+            <configuration>
+              <finalName>SalvoSequenceGdx</finalName>
+              <transformers>
+                <transformer implementation="org.apache.maven.plugins.shade.resource.ManifestResourceTransformer">
+                  <mainClass>com.hysx.salvosequence.PixelHudApp</mainClass>
+                </transformer>
+              </transformers>
+              <filters>
+                <filter>
+                  <artifact>*:*</artifact>
+                  <excludes>
+                    <exclude>META-INF/*.SF</exclude>
+                    <exclude>META-INF/*.DSA</exclude>
+                    <exclude>META-INF/*.RSA</exclude>
+                  </excludes>
+                </filter>
+              </filters>
+            </configuration>
+          </execution>
+        </executions>
+      </plugin>
+
+      <plugin>
+        <groupId>org.apache.maven.plugins</groupId>
+        <artifactId>maven-surefire-plugin</artifactId>
+        <version>3.2.5</version>
+      </plugin>
+    </plugins>
+  </build>
+</project>

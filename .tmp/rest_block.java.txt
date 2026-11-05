@@ -1,0 +1,214 @@
+    // ------------------------------------------------------------ 战术休整
+
+    private static final int REST_TAB_Y = 58;
+    private static final int REST_TAB_W = 84;
+    private static final int REST_TAB_H = 16;
+    private static final int REST_ROW_H = 16;
+    private static final int REST_LIST_Y = 84;
+    private static final int REST_DEPART_X = 250;
+    private static final int REST_DEPART_Y = 310;
+    private static final int REST_DEPART_W = 140;
+    private static final int REST_DEPART_H = 22;
+
+    /** 牌库里出现的牌（按 id 去重，顺序稳定）。 */
+    private List<com.hysx.salvosequence.deck.Card> restDeck() {
+        if (run.fleet() == null) {
+            return java.util.List.of();
+        }
+        java.util.LinkedHashMap<String, com.hysx.salvosequence.deck.Card> byId =
+                new java.util.LinkedHashMap<>();
+        for (var card : run.fleet().deck()) {
+            byId.putIfAbsent(card.id(), card);
+        }
+        return java.util.List.copyOf(byId.values());
+    }
+
+    private int restCount() {
+        return restTab == 0 ? run.restShips().size() : restDeck().size();
+    }
+
+    private ScreenContext restKey(String code) {
+        switch (code) {
+            case "TAB" -> {
+                restTab = 1 - restTab;
+                restCursor = 0;
+                touch();
+            }
+            case "UP" -> {
+                restCursor = Math.max(0, restCursor - 1);
+                touch();
+            }
+            case "DOWN" -> {
+                restCursor = Math.min(Math.max(0, restCount() - 1), restCursor + 1);
+                touch();
+            }
+            case "LEFT", "RIGHT" -> {
+                if (restTab == 0) {
+                    shuffleRestShip(code.equals("RIGHT") ? 1 : -1);
+                }
+            }
+            case "SPACE" -> {
+                if (restTab == 1) {
+                    toggleRestCard();
+                }
+            }
+            case "ENTER" -> {
+                if (restTab == 1) {
+                    toggleRestCard();
+                } else {
+                    departNextWave();
+                }
+            }
+            default -> { }
+        }
+        return null;
+    }
+
+    /** 把选中的船整体前/后挪一格（前排先承伤，前线在右侧）。 */
+    private void shuffleRestShip(int dx) {
+        var ships = run.restShips();
+        if (ships.isEmpty() || restCursor >= ships.size()) {
+            return;
+        }
+        FleetUnit unit = ships.get(restCursor);
+        if (run.moveRestShip(unit.id(), dx, 0)) {
+            touch();
+        } else {
+            say(dx > 0 ? "前面没位置了" : "后面没位置了");
+            touch();
+        }
+    }
+
+    private void toggleRestCard() {
+        var deck = restDeck();
+        if (deck.isEmpty() || restCursor >= deck.size()) {
+            return;
+        }
+        var card = deck.get(restCursor);
+        if (run.toggleBannedCard(card.id())) {
+            boolean banned = run.isCardBanned(card.id());
+            say(banned ? "本节点不再抽到「" + card.nameZh() + "」"
+                    : "「" + card.nameZh() + "」回到牌库");
+            touch();
+        }
+    }
+
+    private void departNextWave() {
+        run.startNextWave();
+        restCursor = 0;
+        touch();
+    }
+
+    private void drawRestScreen(CanvasBuffer buffer, PixelArt art) {
+        art.rect(0, 0, 640, 360, PixelArt.fromArgb(0xC805070C));
+        zh(buffer, Language.t("战术休整", "TACTICAL LULL"), 20, 24, 18, Palette.CYAN);
+        zh(buffer, Language.t("第 " + run.wave() + "/" + run.waveCount() + " 波已清空 · 下一波更难",
+                        "WAVE " + run.wave() + "/" + run.waveCount() + " CLEARED · NEXT IS HARDER"),
+                20, 46, 12, Palette.LINE_DIM);
+
+        String[] tabs = {Language.t("编队", "FLEET"), Language.t("牌库", "DECK")};
+        for (int i = 0; i < 2; i++) {
+            int tx = 20 + i * (REST_TAB_W + 6);
+            boolean on = restTab == i;
+            art.fillRect(tx, REST_TAB_Y, REST_TAB_W, REST_TAB_H,
+                    on ? Palette.PANEL_ALT : Palette.PANEL);
+            art.frame(tx, REST_TAB_Y, REST_TAB_W, REST_TAB_H,
+                    on ? Palette.CYAN : Palette.PANEL_EDGE);
+            zh(buffer, tabs[i], tx + 8, REST_TAB_Y + 4, 12, on ? Palette.CYAN : Palette.LINE);
+        }
+        zh(buffer, Language.t("禁掉的牌只在本节点生效", "BANNED CARDS APPLY TO THIS NODE ONLY"),
+                196, REST_TAB_Y + 4, 12, Palette.LINE_FAINT);
+
+        if (restTab == 0) {
+            drawRestFleet(buffer, art);
+        } else {
+            drawRestDeck(buffer, art);
+        }
+
+        art.fillRect(REST_DEPART_X, REST_DEPART_Y, REST_DEPART_W, REST_DEPART_H, Palette.PANEL_ALT);
+        art.frame(REST_DEPART_X, REST_DEPART_Y, REST_DEPART_W, REST_DEPART_H, Palette.CYAN);
+        zh(buffer, Language.t("出发：下一波", "DEPART: NEXT WAVE"),
+                REST_DEPART_X + 14, REST_DEPART_Y + 6, 12, Palette.CYAN);
+
+        zh(buffer, Language.t("TAB 换页 · 上下选择 · 左右挪船 · 回车出发 / 禁牌 · ESC 设置",
+                        "TAB SWITCH · UP/DOWN PICK · LEFT/RIGHT MOVE · ENTER GO / BAN · ESC"),
+                20, 344, 12, Palette.LINE_DIM);
+    }
+
+    private void drawRestFleet(CanvasBuffer buffer, PixelArt art) {
+        var ships = run.restShips();
+        zh(buffer, Language.t("编队（上=前排，最右侧先承伤）",
+                        "FLEET (TOP = FRONT LINE, RIGHT SIDE TAKES HITS FIRST)"),
+                20, REST_LIST_Y - 8, 12, Palette.LINE_DIM);
+        for (int i = 0; i < ships.size() && i < 12; i++) {
+            FleetUnit unit = ships.get(i);
+            int ry = REST_LIST_Y + 10 + i * REST_ROW_H;
+            boolean on = i == restCursor;
+            if (on) {
+                art.fillRect(16, ry - 4, 300, REST_ROW_H - 2, Palette.PANEL_ALT);
+                art.frame(16, ry - 4, 300, REST_ROW_H - 2, Palette.WARN);
+            }
+            int max = run.maxHpOf(unit);
+            zh(buffer, unit.nameZh(), 22, ry, 12, on ? Palette.CYAN : Palette.LINE);
+            zh(buffer, run.hpOf(unit) + "/" + max, 210, ry, 12,
+                    on ? Palette.CYAN : Palette.LINE_DIM);
+            if (i == 0) {
+                zh(buffer, Language.t("前排", "FRONT"), 276, ry, 12, Palette.WARN);
+            }
+        }
+        zh(buffer, Language.t("← → 把选中的船前后挪一格（让想承伤的船更靠右）",
+                        "LEFT/RIGHT NUDGES THE SHIP: MOVE THE TANK TO THE RIGHT"),
+                20, 300, 12, Palette.LINE_FAINT);
+    }
+
+    private void drawRestDeck(CanvasBuffer buffer, PixelArt art) {
+        var deck = restDeck();
+        zh(buffer, Language.t("牌库（回车：本节点禁掉 / 放回）",
+                        "DECK (ENTER: BAN FOR THIS NODE / RESTORE)"),
+                20, REST_LIST_Y - 8, 12, Palette.LINE_DIM);
+        for (int i = 0; i < deck.size() && i < 12; i++) {
+            var card = deck.get(i);
+            int ry = REST_LIST_Y + 10 + i * REST_ROW_H;
+            boolean on = i == restCursor;
+            boolean banned = run.isCardBanned(card.id());
+            if (on) {
+                art.fillRect(16, ry - 4, 600, REST_ROW_H - 2, Palette.PANEL_ALT);
+                art.frame(16, ry - 4, 600, REST_ROW_H - 2, Palette.WARN);
+            }
+            zh(buffer, card.nameZh(), 22, ry, 12,
+                    banned ? Palette.LINE_FAINT : (on ? Palette.CYAN : Palette.LINE));
+            if (banned) {
+                zh(buffer, Language.t("本节点禁用", "BANNED HERE"), 520, ry, 12, Palette.WARN);
+            }
+        }
+        zh(buffer, Language.t("禁掉的牌不进下一波的牌库；换节点后自动恢复",
+                        "BANNED CARDS SKIP THE NEXT DRAW PILE; RESET AT THE NEXT NODE"),
+                20, 300, 12, Palette.LINE_FAINT);
+    }
+
+    private void collectRestHotspots(HotspotSink sink) {
+        sink.add(20, REST_TAB_Y, REST_TAB_W, REST_TAB_H, () -> {
+            restTab = 0;
+            restCursor = 0;
+            touch();
+        });
+        sink.add(20 + REST_TAB_W + 6, REST_TAB_Y, REST_TAB_W, REST_TAB_H, () -> {
+            restTab = 1;
+            restCursor = 0;
+            touch();
+        });
+        int n = restCount();
+        for (int i = 0; i < n && i < 12; i++) {
+            int ry = REST_LIST_Y + 10 + i * REST_ROW_H;
+            int row = i;
+            sink.add(16, ry - 4, 600, REST_ROW_H - 2, () -> {
+                restCursor = row;
+                if (restTab == 1) {
+                    toggleRestCard();
+                }
+                touch();
+            });
+        }
+        sink.add(REST_DEPART_X, REST_DEPART_Y, REST_DEPART_W, REST_DEPART_H, this::departNextWave);
+    }
+

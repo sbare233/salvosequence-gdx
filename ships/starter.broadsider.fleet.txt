@@ -1,0 +1,10 @@
+# hullbreaker fleet v1
+id starter.broadsider
+name 「叛逃者」薇拉
+ship empire.t773 1 2 1
+ship empire.t762 1 2 4
+ship empire.t763 1 5 8
+ship empire.t769 1 5 1
+ship empire.t770 1 5 3
+ship empire.t768 1 0 6
+ship empire.t776 1 2 7

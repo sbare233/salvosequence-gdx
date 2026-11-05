@@ -1,0 +1,9 @@
+# hullbreaker fleet v1
+id starter.gunship
+name 「领航员」岚
+ship comb.bz2 1 6 4
+ship eagle.congress 1 3 1
+ship dyn.louis 1 3 4
+ship rep.genoa 1 5 7
+ship south.sextant 1 3 7
+ship rep.hansa 1 0 5

@@ -1,0 +1,93 @@
+{
+  "prompt": {
+    "1": {
+      "class_type": "UNETLoader",
+      "inputs": {
+        "unet_name": "moss_image_sft_turbo_int8_convrot.safetensors",
+        "weight_dtype": "default"
+      }
+    },
+    "2": {
+      "class_type": "CLIPLoader",
+      "inputs": {
+        "clip_name": "moss-image-sft-qwen35-int8-convrot-fixed.safetensors",
+        "type": "moss_image",
+        "device": "default"
+      }
+    },
+    "3": {
+      "class_type": "VAELoader",
+      "inputs": {
+        "vae_name": "moss-image-sft-vae.safetensors"
+      }
+    },
+    "4": {
+      "class_type": "EmptyFlux2LatentImage",
+      "inputs": {
+        "width": 1024,
+        "height": 1024,
+        "batch_size": 1
+      }
+    },
+    "5": {
+      "class_type": "CLIPTextEncode",
+      "inputs": {
+        "clip": [
+          "2",
+          0
+        ],
+        "text": "pixel art, top-down view of a small cargo starship, retro 16-bit game sprite, limited palette, crisp pixels, dark space background, clean silhouette"
+      }
+    },
+    "6": {
+      "class_type": "KSampler",
+      "inputs": {
+        "model": [
+          "1",
+          0
+        ],
+        "positive": [
+          "5",
+          0
+        ],
+        "negative": [
+          "5",
+          0
+        ],
+        "latent_image": [
+          "4",
+          0
+        ],
+        "seed": 12345,
+        "steps": 8,
+        "cfg": 1.0,
+        "sampler_name": "euler",
+        "scheduler": "simple",
+        "denoise": 1.0
+      }
+    },
+    "7": {
+      "class_type": "VAEDecode",
+      "inputs": {
+        "samples": [
+          "6",
+          0
+        ],
+        "vae": [
+          "3",
+          0
+        ]
+      }
+    },
+    "8": {
+      "class_type": "SaveImage",
+      "inputs": {
+        "images": [
+          "7",
+          0
+        ],
+        "filename_prefix": "salvo/smoke"
+      }
+    }
+  }
+}
