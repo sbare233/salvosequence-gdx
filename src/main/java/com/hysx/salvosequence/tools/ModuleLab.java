@@ -344,7 +344,7 @@ public final class ModuleLab {
 
     private static int readInt(String env, int fallback) {
         String raw = System.getenv(env);
-        if (raw == null || raw.isBlank()) {
+        if (raw == null || raw.trim().isEmpty()) {
             return fallback;
         }
         try {

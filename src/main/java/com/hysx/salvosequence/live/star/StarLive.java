@@ -45,6 +45,25 @@ public final class StarLive {
     public double yawRad = 0.6;
     public double pitchRad = 0.18;
 
+    /** 恒星类型（黄矮星/蓝巨星/红巨星），换类型会改光球三档色与曝光。 */
+    public StarType type = StarType.YELLOW;
+
+    public void setType(StarType t) {
+        type = t == null ? StarType.YELLOW : t;
+        type.applyTo(params);
+    }
+
+    /**
+     * 构图：恒星在画面里的位置（0..1，左上为原点）。
+     *
+     * <p>只改距离的话，太阳永远钉在同一个角上；把这颗星推到左上角、右下角、
+     * 或者干脆居中，同一个场景才会像不同的机位。</p>
+     */
+    public void setFraming(double x, double y) {
+        offsetX = Math.max(-0.15, Math.min(1.15, x));
+        offsetY = Math.max(-0.15, Math.min(1.15, y));
+    }
+
     public void ensureGl() {
         if (ready) {
             return;
@@ -132,13 +151,19 @@ public final class StarLive {
         starShader.setUniformf("u_limb", params.limb);
         starShader.setUniformf("u_exposure", params.exposure);
         starShader.setUniformf("u_dbg", 0f);
+        starShader.setUniformf("u_cool", params.coolR, params.coolG, params.coolB);
+        starShader.setUniformf("u_mid", params.midR, params.midG, params.midB);
+        starShader.setUniformf("u_hot", params.hotR, params.hotG, params.hotB);
+        float[] limbTint = type.limbTint();
+        starShader.setUniformf("u_limbTint", limbTint[0], limbTint[1], limbTint[2]);
         sphere.render(starShader);
         starShader.end();
         Gdx.gl.glDisable(GL20.GL_CULL_FACE);
 
         float tanHalf = MathUtils.tanDeg(cam.fieldOfView * 0.5f);
+        float[] tint = type.coronaTint();
         corona.render(cam, (float) time, params.prominences, params.exposure, tanHalf,
-                FBW / (float) FBH, seedVec);
+                FBW / (float) FBH, seedVec, tint[0], tint[1], tint[2]);
 
         Vector3 center = new Vector3(0, 0, 0).prj(cam.combined);
         float su = (center.x + 1f) * 0.5f;

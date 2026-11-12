@@ -34,7 +34,7 @@ public record Enemy(String id, String nameZh, String nameEn, int hp, Ship hull,
                     List<Played> plan, String textZh) {
 
     public Enemy {
-        if (id == null || id.isBlank()) {
+        if (id == null || id.trim().isEmpty()) {
             throw new IllegalArgumentException("敌舰必须有 id");
         }
         if (hull == null) {

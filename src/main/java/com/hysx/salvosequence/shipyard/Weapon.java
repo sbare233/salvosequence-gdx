@@ -44,7 +44,7 @@ public record Weapon(
         String description) {
 
     public Weapon {
-        if (id == null || id.isBlank() || name == null || name.isBlank()) {
+        if (id == null || id.trim().isEmpty() || name == null || name.trim().isEmpty()) {
             throw new IllegalArgumentException("武器必须有 id 与显示名");
         }
         if (mountW <= 0 || mountH <= 0) {
@@ -56,7 +56,7 @@ public record Weapon(
         if (cooldown <= 0) {
             throw new IllegalArgumentException("武器 " + id + " 的冷却必须为正，收到 " + cooldown);
         }
-        if (projectileId == null || projectileId.isBlank()) {
+        if (projectileId == null || projectileId.trim().isEmpty()) {
             throw new IllegalArgumentException("武器 " + id + " 必须指定弹种");
         }
         if (description == null) {

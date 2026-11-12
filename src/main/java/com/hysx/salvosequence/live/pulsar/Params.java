@@ -5,10 +5,11 @@ public final class Params
 {
     public long seed = 20261031L;
 
-    public float starRadius = 1.0f;
+    /** 星体半径：0.70 是"远处一颗小点"，再大就占满画面。 */
+    public float starRadius = 0.70f;
 
-    /** 自转速度，单位：圈/秒。 */
-    public float spinSpeed = 0.55f;
+    /** 自转速度，单位：圈/秒。中子星转得快：0.95 圈/秒时束流扫过的节奏才像灯塔。 */
+    public float spinSpeed = 0.95f;
 
     /** 磁倾角：磁轴与自转轴的夹角（度）。脉冲就来自这个夹角。 */
     public float tiltDeg = 28f;
@@ -19,30 +20,31 @@ public final class Params
     /** 束流长度（以星半径为单位）。 */
     public float beamLength = 7.0f;
 
-    public float beamBright = 0.85f;
+    /** 束流亮度：1.00 让束流比纯白的星体略暗一档，别糊成一团白。 */
+    public float beamBright = 1.00f;
 
     /** 每极的喷流粒子数（运行时只画前面这么多，不会重建网格）。 */
     public int beamParticles = 40000;
     public float beamSway = 0.22f;
 
     /** 极冠亮度（磁极被粒子轰击的亮斑）。 */
-    public float capBright = 1.0f;
+    public float capBright = 1.35f;
 
     /** 表面温度 0..1（0 偏冷蓝，1 偏炽白）。 */
-    public float temp = 0.78f;
+    public float temp = 1.0f;
 
-    public float limb = 0.70f;
+    /** 边缘暗化 0..1：0.30 只留一圈很淡的边，星体整体是纯白。 */
+    public float limb = 0.30f;
 
-    public float exposure = 0.55f;
+    /** 曝光：1.12 让星体过曝成纯白（斑驳/热斑被削平），束流仍保留层次。 */
+    public float exposure = 1.12f;
 
-    public float bloomStrength = 0.45f;
+    /** 泛光：0.85 让白球外圈洇开一圈亮雾，隔着半透明棋盘也读得出"很亮"。 */
+    public float bloomStrength = 0.85f;
     public float bloomThreshold = 0.62f;
 
     /** 脉冲束开关。 */
     public boolean beams = true;
-
-    /** 磁力线开关。 */
-    public boolean fieldLines = true;
 
     public Params copy()
     {
@@ -62,7 +64,6 @@ public final class Params
         p.bloomStrength = bloomStrength;
         p.bloomThreshold = bloomThreshold;
         p.beams = beams;
-        p.fieldLines = fieldLines;
         return p;
     }
 }

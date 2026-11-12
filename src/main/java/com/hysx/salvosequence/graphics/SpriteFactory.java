@@ -282,7 +282,12 @@ public final class SpriteFactory {
      * @param head 弹头字符
      */
     private static SpriteSheet projectile(String role, int w, int h, char tail, char head) {
-        String grid = String.valueOf(tail).repeat(w - 1) + head;
+        // 不用 String.repeat：API 28 的真机 libcore 里没有这个方法（真机 NoSuchMethodError）
+        StringBuilder body = new StringBuilder(Math.max(1, w - 1));
+        for (int i = 0; i < Math.max(0, w - 1); i++) {
+            body.append(tail);
+        }
+        String grid = body.append(head).toString();
         Map<Character, com.hysx.salvosequence.core.Color> palette = PaletteSprite.palette(
                 '.', null,
                 tail, Palette.CYAN_DIM,

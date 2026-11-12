@@ -25,6 +25,11 @@ public class Params {
     /** 自动旋转。 */
     public boolean autoRotate = true;
 
+    /** 光球三档色（冷端 / 中间调 / 最热处），由恒星类型写入。 */
+    public float coolR = 1.00f, coolG = 0.80f, coolB = 0.56f;
+    public float midR = 1.00f, midG = 0.97f, midB = 0.90f;
+    public float hotR = 1.00f, hotG = 1.00f, hotB = 1.00f;
+
     public Params copy() {
         Params p = new Params();
         p.seed = seed;
@@ -38,6 +43,15 @@ public class Params {
         p.spikes = spikes;
         p.dispersion = dispersion;
         p.autoRotate = autoRotate;
+        p.coolR = coolR;
+        p.coolG = coolG;
+        p.coolB = coolB;
+        p.midR = midR;
+        p.midG = midG;
+        p.midB = midB;
+        p.hotR = hotR;
+        p.hotG = hotG;
+        p.hotB = hotB;
         return p;
     }
 }

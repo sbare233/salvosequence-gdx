@@ -200,12 +200,12 @@ public final class ShipLab {
 
     private static String readEnv(String key, String fallback) {
         String v = System.getenv(key);
-        return v == null || v.isBlank() ? fallback : v.trim();
+        return v == null || v.trim().isEmpty() ? fallback : v.trim();
     }
 
     private static int readInt(String key, int fallback) {
         String v = System.getenv(key);
-        if (v == null || v.isBlank()) {
+        if (v == null || v.trim().isEmpty()) {
             return fallback;
         }
         try {

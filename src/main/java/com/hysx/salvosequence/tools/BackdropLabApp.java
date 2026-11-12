@@ -28,7 +28,7 @@ public final class BackdropLabApp {
                 return;
             }
             String filter = System.getProperty("lab.filter");
-            if (filter != null && !filter.isBlank()) {
+            if (filter != null && !filter.trim().isEmpty()) {
                 try {
                     VideoSettings.setBackdropFilter(VideoSettings.BackdropFilter.valueOf(
                             filter.trim().toUpperCase(java.util.Locale.ROOT)));

@@ -77,6 +77,25 @@ public interface Screen {
      *
      * @return true 表示需要重建
      */
+    /**
+     * 要不要显示全局的「返回」按钮（左下角）。
+     *
+     * <p>战斗界面左下角是"跳过回合"的三角按钮，全局返回键会压在上面，所以那边隐藏。</p>
+     */
+    default boolean wantsGlobalBackButton() {
+        return true;
+    }
+
+    /**
+     * 立绘由本界面自己画（压在 UI 下面、棋盘上面），{@code ScreenManager} 不再画第二遍。
+     *
+     * <p>战斗/战术休整/太空港这类有棋盘的界面返回 {@code true}，在画完棋盘后调
+     * {@code PortraitLayer.draw(art)}；其它界面保持默认（立绘压在所有 UI 之上）。</p>
+     */
+    default boolean drawsPortraitUnderUi() {
+        return false;
+    }
+
     default boolean consumeHotspotDirty() {
         return false;
     }

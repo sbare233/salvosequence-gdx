@@ -15,6 +15,7 @@ uniform float u_time;
 uniform vec3  u_seed;
 uniform float u_prom;      // 日珥强度
 uniform float u_exposure;
+uniform vec3  u_tint;      // 光谱着色（蓝巨星拉冷、红巨星加深）
 
 uniform vec3  u_arcA[8];
 uniform vec3  u_arcB[8];
@@ -121,5 +122,9 @@ void main() {
     }
 
     col *= (1.0 - hit);   // 恒星本体挡住的部分不叠加
+    // 光谱着色：日冕/日珥原本是暖橙色，直接乘系数只会变暗、不会变蓝，
+    // 所以按亮度换成类型色（蓝巨星 → 青白，红巨星 → 深橙红）
+    float lum = dot(col, vec3(0.30, 0.59, 0.11));
+    col = mix(col, lum * u_tint, 0.88);
     gl_FragColor = vec4(col * u_exposure, 1.0);
 }

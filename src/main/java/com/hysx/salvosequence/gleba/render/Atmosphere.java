@@ -60,9 +60,13 @@ public class Atmosphere {
             "uniform float u_exposure;\n" +
             "\n" +
             "// 瑞利散射系数（每「行星半径」长度的消光），R 通道最弱、B 通道最强\n" +
-            "const vec3 BETA = vec3(5.9, 13.9, 34.1);\n" +
+            "uniform vec3 u_betaScale;\n" +
+            "uniform float u_thickness;\n" +
+            "const vec3 BETA_BASE = vec3(5.9, 13.9, 34.1);\n" +
+            "#define BETA (BETA_BASE * u_betaScale)\n" +
             "// 标高（行星半径单位）。真实地球约 0.0013，这里略厚一点让梯度更柔和\n" +
             "const float SCALE_H = 0.018;\n" +
+            "#define SCALE_H_NOW (SCALE_H * u_thickness)\n" +
             "\n" +
             "// 射线与球求交；相机在球外，返回最近与最远交点\n" +
             "bool hitSphere(vec3 o, vec3 d, float r, out float t0, out float t1) {\n" +
@@ -86,7 +90,7 @@ public class Atmosphere {
             "    float f = (float(i) + 0.5) / 8.0;\n" +
             "    vec3 q = p + u_sunDir * (te * f);\n" +
             "    float h = max(length(q) - u_Rg, 0.0);\n" +
-            "    sum += exp(-h / SCALE_H) * (te / 8.0);\n" +
+            "    sum += exp(-h / SCALE_H_NOW) * (te / 8.0);\n" +
             "  }\n" +
             "  return sum;\n" +
             "}\n" +
@@ -124,7 +128,7 @@ public class Atmosphere {
             "    float dt = tB - tA;\n" +
             "    vec3 p = ro + rd * (tA + dt * 0.5);\n" +
             "    float h = max(length(p) - u_Rg, 0.0);\n" +
-            "    float dens = exp(-h / SCALE_H);\n" +
+            "    float dens = exp(-h / SCALE_H_NOW);\n" +
             "    odView += dens * dt;\n" +
             "    float odSun = sunOpticalDepth(p);\n" +
             "    vec3 trans = exp(-BETA * (odView + odSun));\n" +
@@ -153,7 +157,7 @@ public class Atmosphere {
             "  float strength = clamp(u_sunIntensity / 24.0, 0.0, 2.0);\n" +
             "  if (hitPlanet) {\n" +
             "    // 垂直光学厚度 = BETA * SCALE_H，斜视按 airmass 放大\n" +
-            "    vec3 tau = BETA * SCALE_H * airmass;\n" +
+            "    vec3 tau = BETA * SCALE_H_NOW * airmass;\n" +
             "    alpha = clamp(1.0 - exp(-tau.g), 0.0, 1.0) * strength;\n" +
             "    col = min(SKY_TINT * alpha * u_sunIntensity * 0.045, vec3(0.85, 0.92, 1.0));\n" +
             "  } else {\n" +
@@ -182,11 +186,28 @@ public class Atmosphere {
     }
 
     /**
+     * 大气颜色：乘在瑞利系数上。<1 表示该波长散射弱、>1 表示强。
+     * 地球是 (1,1,1)（蓝最强）；橙色大气调大 R、压小 B。
+     */
+    public void setTint(float r, float g, float b) {
+        tintR = r;
+        tintG = g;
+        tintB = b;
+    }
+
+    private float tintR = 1f, tintG = 1f, tintB = 1f;
+    /** 大气厚度倍率：0 = 真空没有大气，1 = 默认，1.4 以上是会发光的厚壳。 */
+    public float thickness = 1f;
+
+    /**
      * @param camCombined 相机的 view*projection 矩阵
      * @param camPos      相机世界位置
      * @param sunDir      指向太阳的单位向量
      */
     public void render(Matrix4 camCombined, Vector3 camPos, Vector3 sunDir, float sunIntensity) {
+        if (thickness <= 0.02f) {
+            return;   // 没有大气：整层直接不画（"每颗星球都裹一层蓝边"最假）
+        }
         invVP.set(camCombined).inv();
 
         Gdx.gl.glDisable(GL20.GL_DEPTH_TEST);
@@ -201,8 +222,10 @@ public class Atmosphere {
         shader.setUniformf("u_camPos", camPos);
         shader.setUniformf("u_sunDir", sunDir);
         shader.setUniformf("u_Rg", PLANET_RADIUS);
-        shader.setUniformf("u_Rt", ATMO_RADIUS);
+        shader.setUniformf("u_Rt", PLANET_RADIUS * (1f + 0.10f * thickness));
+        shader.setUniformf("u_thickness", thickness);
         shader.setUniformf("u_sunIntensity", sunIntensity);
+        shader.setUniformf("u_betaScale", tintR, tintG, tintB);
         shader.setUniformf("u_exposure", 1.15f);
         quad.render(shader, GL20.GL_TRIANGLES);
 

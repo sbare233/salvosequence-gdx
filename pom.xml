@@ -78,6 +78,10 @@
         <configuration>
           <release>${java.version}</release>
           <encoding>${project.build.sourceEncoding}</encoding>
+          <!-- 别用"清空输出目录再全量重编"的增量策略：游戏常常直接跑 target/classes，
+               编译中途那些 class 会短暂消失，正在运行的进程这时再加载新类就会
+               NoClassDefFoundError（比如点一张牌触发的 Battle$Side）。改成原地覆盖。 -->
+          <useIncrementalCompilation>false</useIncrementalCompilation>
         </configuration>
       </plugin>
 

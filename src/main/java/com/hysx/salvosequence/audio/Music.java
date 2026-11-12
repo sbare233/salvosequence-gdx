@@ -262,7 +262,7 @@ public final class Music {
      * @return 真的开始放了才返回 true
      */
     public static synchronized boolean playPath(String resourcePath, boolean loop) {
-        if (resourcePath == null || resourcePath.isBlank()) {
+        if (resourcePath == null || resourcePath.trim().isEmpty()) {
             return false;
         }
         Sequence seq = load(resourcePath);
@@ -563,7 +563,7 @@ public final class Music {
      */
     private static MusicTrack override(MusicTrack requested) {
         String name = System.getProperty("music.track");
-        if (name == null || name.isBlank()) {
+        if (name == null || name.trim().isEmpty()) {
             return requested;
         }
         for (MusicTrack candidate : MusicTrack.values()) {

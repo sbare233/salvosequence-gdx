@@ -167,6 +167,21 @@ public final class PixelArt {
         markDirty(x, y, x, y);
     }
 
+    /** 带 alpha 混合的写像素（贴倾斜层时用，热路径）。 */
+    public void blendArgb(int x, int y, int argb) {
+        if (x < 0 || y < 0 || x >= width || y >= height) {
+            return;
+        }
+        int i = y * width + x;
+        int blended = over(argb, pixels[i]);
+        if (blended == pixels[i]) {
+            return;
+        }
+        pixels[i] = blended;
+        pendingUpload = true;
+        markDirty(x, y, x, y);
+    }
+
     /** 取已有像素颜色（透明返回 null）。 */
     public Color pixelAt(int x, int y) {
         if (x < 0 || y < 0 || x >= width || y >= height) {
@@ -521,6 +536,49 @@ public final class PixelArt {
      *
      * @param quantize 每通道色阶宽度（8~24 观感明显；&lt;=1 等价普通 blit）
      */
+    /**
+     * 从一张 {@code sw×sh} 的图里裁出 {@code (sx,sy,w,h)} 贴到 {@code (dx,dy)}。
+     *
+     * <p>和 {@link #blitArgbTile} 的区别：那里的 {@code sw} 既是源图宽度又是裁切宽度，
+     * 只能整图贴；这里源图步长和裁切区宽高分开传，所以可以从一张大 sheet 里抠任意一块
+     * （Aseprite 导出的界面贴图就是整张 640×360，按切片矩形裁）。</p>
+     *
+     * <p>{@code blend} 为 true 时按 alpha 混合到已有像素上；为 false 时直接覆盖。</p>
+     */
+    public void blitArgbSub(int[] src, int sw, int sh, int sx, int sy,
+                            int dx, int dy, int w, int h, boolean blend) {
+        if (src == null || sw <= 0 || sh <= 0 || w <= 0 || h <= 0) {
+            return;
+        }
+        int x0 = Math.max(0, dx);
+        int y0 = Math.max(0, dy);
+        int x1 = Math.min(width, dx + w);
+        int y1 = Math.min(height, dy + h);
+        for (int y = y0; y < y1; y++) {
+            int srcY = sy + (y - dy);
+            if (srcY < 0 || srcY >= sh) {
+                continue;
+            }
+            int srcRow = srcY * sw;
+            int dstRow = y * width;
+            for (int x = x0; x < x1; x++) {
+                int srcX = sx + (x - dx);
+                if (srcX < 0 || srcX >= sw) {
+                    continue;
+                }
+                int s = src[srcRow + srcX];
+                int a = s >>> 24;
+                if (a == 0) {
+                    continue;
+                }
+                int dst = dstRow + x;
+                pixels[dst] = (a == 0xFF || !blend) ? s : over(s, pixels[dst]);
+            }
+        }
+        pendingUpload = true;
+        markDirty(x0, y0, x1 - 1, y1 - 1);
+    }
+
     public void blitArgbTileDithered(int[] src, int sw, int sh, int sx, int sy,
                                      int dx, int dy, int dw, int dh,
                                      boolean replaceTransparent, double tint, int quantize) {

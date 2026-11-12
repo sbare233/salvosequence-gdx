@@ -9,31 +9,40 @@ public final class Erosion {
     public static final float TILE_SPACING_M = 25231.325f;
     private static final float RAD2DEG = 57.29577951308232f;
     private static final float SLOPE_THRESHOLD_DEG = 3.0f;
+    /** tan(3°)：坡度比较直接比 Δh/间距，省掉每邻格一次 atan2（热侵蚀的大头）。 */
+    private static final float SLOPE_RATIO = (float) Math.tan(Math.toRadians(SLOPE_THRESHOLD_DEG));
     private static final float BLEND = 0.5f;
 
     /** 热侵蚀：把过陡的坡按 0.5 系数拉向最陡邻居的高程。 */
     public static void thermal(SphereGrid g, PlanetData d, int iterations) {
         int n = g.tiles;
         float[] h = d.elevation;
+        float[] next = new float[n];
         for (int it = 0; it < iterations; it++) {
-            float[] next = h.clone();
+            System.arraycopy(h, 0, next, 0, n);
             for (int t = 0; t < n; t++) {
-                float maxSlope = 0f;
+                // 坡度 = atan2(Δh, 间距) 是单调函数，比大小等价于比 |Δh|/间距。
+                // 原实现每格每轮对每个邻格算一次 atan2：131k 格 × 10 轮 ≈ 800 万次三角函数。
+                float steepestDrop = 0f;
                 int steepest = -1;
                 for (int k = g.nbStart[t]; k < g.nbStart[t + 1]; k++) {
                     int nb = g.nbList[k];
                     float dh = h[nb] - h[t];
-                    float slope = Math.abs((float) Math.atan2(dh, TILE_SPACING_M)) * RAD2DEG;
-                    if (slope > maxSlope && dh < 0) {
-                        maxSlope = slope;
+                    if (dh < 0f && -dh > steepestDrop) {
+                        steepestDrop = -dh;
                         steepest = nb;
                     }
                 }
-                if (steepest >= 0 && maxSlope > SLOPE_THRESHOLD_DEG) {
+                if (steepest >= 0 && steepestDrop / TILE_SPACING_M > SLOPE_RATIO) {
                     next[t] = h[t] + (h[steepest] - h[t]) * BLEND;
                 }
             }
-            System.arraycopy(next, 0, h, 0, n);
+            float[] tmp = h;
+            h = next;
+            next = tmp;
+        }
+        if (h != d.elevation) {
+            System.arraycopy(h, 0, d.elevation, 0, n);
         }
     }
 
@@ -48,24 +57,28 @@ public final class Erosion {
         // 一堆几百格的小流域（尽量沿"大尺度地势"排水，才可能长出长河）
         float[] filled = fillDepressions(g, smooth(g, h, 4));
 
-        // 1. 按"填洼后"高程降序
-        Integer[] order = new Integer[n];
-        for (int i = 0; i < n; i++) order[i] = i;
-        java.util.Arrays.sort(order, (a, b) -> Float.compare(filled[b], filled[a]));
+        // 1. 按"填洼后"高程降序（用 long 键 + 原生排序：原来 Integer[] + 比较器要装箱 13 万次，
+        //    是水力侵蚀里最贵的一步）
+        int[] order = sortDesc(filled);
 
-        // 2. 汇流累积：routing 走 filled 面，洼地不会截断流域
+        // 2. 汇流累积：routing 走 filled 面，洼地不会截断流域；顺手把流路记下来，
+        //    第 3 步下切直接查表，不用再扫一遍邻域
         float[] flow = d.water;
         java.util.Arrays.fill(flow, 1f);
-        for (Integer t : order) {
+        int[] down = new int[n];
+        java.util.Arrays.fill(down, -1);
+        for (int i = 0; i < n; i++) {
+            int t = order[i];
             if (filled[t] <= 0f) continue;              // 海洋是汇，不再往更低的格子传
             int lowest = routeTarget(g, filled, t);
+            down[t] = lowest;
             if (lowest >= 0) flow[lowest] += flow[t];
         }
 
         // 3. 下切：只切陆地流路，且不倒坡
         for (int t = 0; t < n; t++) {
             if (h[t] <= 0f) continue;
-            int lowest = routeTarget(g, filled, t);
+            int lowest = down[t];
             if (lowest < 0) continue;
             float drop = h[t] - h[lowest];
             if (drop < 1f) continue;
@@ -74,6 +87,22 @@ public final class Erosion {
             h[t] -= cut;
             if (h[t] < h[lowest]) h[t] = h[lowest];
         }
+        // 河流阈值判断要用汇流量，这一份与 hill-shade 无关，保留原值
+    }
+
+    /** 高程降序的稳定索引排序（long 键：高 32 位是取反的 float 位序，低 32 位是索引）。 */
+    private static int[] sortDesc(float[] h) {
+        int n = h.length;
+        long[] keys = new long[n];
+        for (int i = 0; i < n; i++) {
+            int bits = Float.floatToIntBits(h[i]);
+            int mapped = bits ^ ((bits >> 31) & 0x7fffffff);   // IEEE → 单调无符号
+            keys[i] = ((long) (~mapped) & 0xFFFFFFFFL) << 32 | (i & 0xFFFFFFFFL);
+        }
+        java.util.Arrays.sort(keys);
+        int[] order = new int[n];
+        for (int i = 0; i < n; i++) order[i] = (int) (keys[i] & 0xFFFFFFFFL);
+        return order;
     }
 
 

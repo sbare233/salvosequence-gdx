@@ -1,8 +1,13 @@
 package com.hysx.salvosequence.ui;
 
 import com.hysx.salvosequence.core.CanvasBuffer;
+import com.hysx.salvosequence.core.CursorArt;
 import com.hysx.salvosequence.core.Palette;
+import com.hysx.salvosequence.core.PixelArt;
 import com.hysx.salvosequence.core.PixelFont;
+import com.hysx.salvosequence.core.Platform;
+import com.hysx.salvosequence.core.UiChrome;
+import com.hysx.salvosequence.core.UiDepth;
 import com.hysx.salvosequence.render.HotspotSink;
 import com.hysx.salvosequence.screen.CardLoopScreen;
 import com.hysx.salvosequence.screen.FleetArrangementScreen;
@@ -12,7 +17,7 @@ import com.hysx.salvosequence.screen.ScreenContext;
 import com.hysx.salvosequence.screen.SpriteLabScreen;
 import com.hysx.salvosequence.screen.StartScreen;
 import com.hysx.salvosequence.screen.ToggleScreen;
-import com.hysx.salvosequence.screen.experiment.PortraitOverlay;
+import com.hysx.salvosequence.screen.PortraitLayer;
 import com.badlogic.gdx.graphics.Cursor;
 import com.badlogic.gdx.Gdx;
 
@@ -41,6 +46,49 @@ public final class ScreenManager implements HotspotSink, TouchGestures.PointerSi
     /** 界面切换的淡入淡出时长（秒）。 */
     private static final double FADE_TIME = 0.28;
 
+    /** 自绘像素指针（{@code -Dsalvo.cursor=system} 可退回系统指针）。 */
+    private static final boolean CUSTOM_CURSOR =
+            !"system".equals(System.getProperty("salvo.cursor", ""));
+
+    /** 截图钩子：{@code -Dsalvo.cursorAt=x,y,mode} 强制画一支指针（审计工具用）。 */
+    private static final double[] FORCED_CURSOR = parseForcedCursor();
+    private static final double forcedCursorX = FORCED_CURSOR == null ? 0 : FORCED_CURSOR[0];
+    private static final double forcedCursorY = FORCED_CURSOR == null ? 0 : FORCED_CURSOR[1];
+    private static final CursorArt.Mode FORCED_CURSOR_MODE =
+            FORCED_CURSOR == null ? null : CursorArt.Mode.valueOf(
+                    System.getProperty("salvo.cursorAt", "").split(",")[2].trim().toUpperCase());
+
+    /** 截图钩子：{@code -Dsalvo.cursorMorph=0.45} 冻结在暴甲中途。 */
+    private static final double FORCED_MORPH = parseDouble(System.getProperty("salvo.cursorMorph"), 0);
+
+    private static double[] parseForcedCursor() {
+        String raw = System.getProperty("salvo.cursorAt");
+        if (raw == null) {
+            return null;
+        }
+        String[] parts = raw.split(",");
+        if (parts.length < 3) {
+            return null;
+        }
+        try {
+            return new double[]{Double.parseDouble(parts[0].trim()),
+                    Double.parseDouble(parts[1].trim())};
+        } catch (NumberFormatException e) {
+            return null;
+        }
+    }
+
+    private static double parseDouble(String raw, double fallback) {
+        if (raw == null) {
+            return fallback;
+        }
+        try {
+            return Double.parseDouble(raw.trim());
+        } catch (NumberFormatException e) {
+            return fallback;
+        }
+    }
+
     /** 热区类型：对应原 JavaFX 版四类 Region 挂的事件组合。 */
     private static final int KIND_CLICK = 0;   // add：只有点击
     private static final int KIND_HOVER = 1;   // hover：点击 + 进入/离开
@@ -59,7 +107,8 @@ public final class ScreenManager implements HotspotSink, TouchGestures.PointerSi
                            java.util.function.BiConsumer<Double, Double> onMove,
                            java.util.function.BiConsumer<Double, Double> onDrag,
                            java.util.function.BiConsumer<Double, Double> onPress,
-                           Runnable onRelease) {
+                           Runnable onRelease,
+                           com.hysx.salvosequence.core.UiTilt.Plane plane) {
 
         boolean contains(double px, double py) {
             return px >= x && px < x + w && py >= y && py < y + h;
@@ -68,6 +117,14 @@ public final class ScreenManager implements HotspotSink, TouchGestures.PointerSi
 
     /** 当前界面的热区定义（设计坐标）。 */
     private final List<Hotspot> hotspots = new ArrayList<>();
+
+    /** 登记热区时所属的倾斜平面（界面在 collectHotspots 里切换）。 */
+    private com.hysx.salvosequence.core.UiTilt.Plane currentPlane =
+            com.hysx.salvosequence.core.UiTilt.UI;
+
+    /** 上一次命中点在该热区所在平面里的坐标（回调拿这个，不是屏幕坐标）。 */
+    private double hitX;
+    private double hitY;
 
     private final PixelFont font = new PixelFont();
 
@@ -84,6 +141,16 @@ public final class ScreenManager implements HotspotSink, TouchGestures.PointerSi
     private boolean debugVisible;
     private double time;
     private Runnable quitHandler = () -> System.exit(0);
+
+    /** 自绘指针：当前形态、上一个形态、变形余量（1→0）。 */
+    private CursorArt.Mode cursorMode = CursorArt.Mode.ARROW;
+    private CursorArt.Mode prevCursorMode = CursorArt.Mode.ARROW;
+    private double cursorMorph;
+    /** 指针在设计坐标里的位置；没进过窗口时不画。 */
+    private double pointerX = -100;
+    private double pointerY = -100;
+    private boolean pointerInside;
+    private boolean systemCursorHidden;
 
     /** 缩放到屏幕的换算：设计像素 -> 窗口像素。 */
     private double scale = 3;
@@ -143,6 +210,13 @@ public final class ScreenManager implements HotspotSink, TouchGestures.PointerSi
     /** 每帧调用：驱动当前界面并做界面切换。 */
     public void update(double dt) {
         time += dt;
+        // 指针位置 → 各浮动层的位移。平滑放在这里推进，界面只管按高度取偏移，
+        // 这样界面自己不必持有任何跟鼠标有关的状态。
+        UiDepth.update(dt);
+        // 暴甲变形的余量：0.22 秒演完
+        if (cursorMorph > 0) {
+            cursorMorph = Math.max(0, cursorMorph - dt / 0.22);
+        }
 
         // 过渡推进
         if (pending != null) {
@@ -179,49 +253,76 @@ public final class ScreenManager implements HotspotSink, TouchGestures.PointerSi
     }
 
     /**
-     * 全屏人物立绘：任何界面按 F12 都能开关，画在所有界面内容之上（压暗、过渡之前）。
+     * 全屏人物立绘：任何界面按 F12 都能开关，默认画在所有界面内容之上（压暗、过渡之前）。
      *
-     * <p>懒加载：只有真按下 F12 才去读 {@code /sprites/portrait.png}，没按过的会话
-     * 一分钱不花，测试里也不会为了构造 ScreenManager 去解码图片。</p>
+     * <p>有棋盘的界面（战斗/战术休整/太空港）要把它压在 UI 下面、棋盘上面，
+     * 那些界面自己覆盖 {@code drawsPortraitUnderUi()} 并画，这里就不再重复画一遍。</p>
      */
-    private PortraitOverlay portrait;
-
     {
         // 截图/自测：-Dsalvosequence.portrait=true 开局就显示（不设属性时不建，零开销）
         if (Boolean.getBoolean("salvosequence.portrait")) {
-            portrait = new PortraitOverlay();
-            portrait.setVisible(true);
+            PortraitLayer.show();
         }
     }
 
-    /**
-     * F12：没有就建（建出来直接显示），有就翻转。
-     *
-     * <p>自测/截图用的 {@code -Dsalvosequence.portrait=true} 在字段初始化时就把立绘
-     * 建好并显示——这个开关只影响"开局是否可见"，开关逻辑和 F12 完全一样。</p>
-     */
     private void togglePortrait() {
-        if (portrait == null) {
-            portrait = new PortraitOverlay();
-            portrait.setVisible(true);
-        } else {
-            portrait.toggle();
-        }
+        PortraitLayer.toggle();
     }
 
     /** 每帧调用：画当前界面 + 后处理。 */
     public void draw(CanvasBuffer buffer) {
         current.draw(buffer);
-        drawBackButton(buffer);
+        if (current.wantsGlobalBackButton()) {
+            drawBackButton(buffer);
+        }
         if (debugVisible) {
             drawDebug(buffer);
         }
         // 彩蛋画在界面内容之上：它是"站在场景里的人"，但过渡遮罩仍然盖住它
-        if (portrait != null) {
-            portrait.draw(buffer.art());
+        if (!current.drawsPortraitUnderUi()) {
+            PortraitLayer.draw(buffer.art());
         }
         if (fade < 1) {
             drawFade(buffer);
+        }
+        drawCursor(buffer.art());
+    }
+
+    /**
+     * 自绘像素指针：系统指针藏起来，改由画布画一台小机器。
+     *
+     * <p>画在最后一层（连过渡遮罩之上），因为指针必须永远看得见；
+     * 形态跟着热区类型走：可点=爪、棋盘/绘图=准星、其余=箭头。</p>
+     */
+    private void drawCursor(PixelArt art) {
+        if (!CUSTOM_CURSOR || Platform.isAndroid()) {
+            return;
+        }
+        if (FORCED_CURSOR_MODE != null) {
+            hideSystemCursor();
+            CursorArt.draw(art, forcedCursorX, forcedCursorY, FORCED_CURSOR_MODE,
+                    CursorArt.Mode.ARROW, FORCED_MORPH, time);
+            return;
+        }
+        if (!pointerInside) {
+            // 还没收到过指针位置：系统指针先留着，别让用户找不到鼠标
+            return;
+        }
+        hideSystemCursor();
+        CursorArt.draw(art, pointerX, pointerY, cursorMode, prevCursorMode, cursorMorph, time);
+    }
+
+    /** 藏系统指针（只在成功过一次之后才不再尝试）。 */
+    private void hideSystemCursor() {
+        if (systemCursorHidden || Gdx.graphics == null) {
+            return;
+        }
+        try {
+            Gdx.graphics.setSystemCursor(Cursor.SystemCursor.None);
+            systemCursorHidden = true;
+        } catch (RuntimeException e) {
+            // 无窗口（审计工具）时没有系统指针可藏，照常画自己的
+            systemCursorHidden = true;
         }
     }
 
@@ -335,29 +436,43 @@ public final class ScreenManager implements HotspotSink, TouchGestures.PointerSi
     /** 把当前界面的热区定义重建一遍（换界面 / 界面状态变化时）。 */
     private void rebuildHotspots() {
         hotspots.clear();
+        currentPlane = com.hysx.salvosequence.core.UiTilt.UI;
         // 老界面随层一起消失：JavaFX 对被摘掉的 Region 不补发 exited，这里同样静默。
         // hovered 丢了无妨（下次 mouseMoved 重新建立）；【不能】清 pressed/activeDrag——
         // 星图平移每帧 touch() 重建热区，拖动手势必须跨越重建（等价原版场景级拖动）。
         hovered = -1;
         current.collectHotspots(this);
         // 全局返回键最后加：命中测试从后往前，界面自己在同一块地方登记了热区时以它为优先。
-        add(BACK_X, BACK_Y, BACK_W, BACK_H, this::handleBack);
+        if (current.wantsGlobalBackButton()) {
+            add(BACK_X, BACK_Y, BACK_W, BACK_H, this::handleBack);
+        }
         updateCursor();
     }
 
     // ------------------------------------------------------------ 热区登记
 
+    /**
+     * 登记热区归属的倾斜平面：之后登记的热区都按这个平面做命中反变换。
+     *
+     * <p>棋盘那一层比面板更斜，指针落在棋盘上时要先反着转回来，才和画出来的格子对得上。
+     * 界面自己在 {@code collectHotspots} 里切换，默认是 {@link UiTilt#UI}。</p>
+     */
+    @Override
+    public void plane(com.hysx.salvosequence.core.UiTilt.Plane plane) {
+        currentPlane = plane == null ? com.hysx.salvosequence.core.UiTilt.UI : plane;
+    }
+
     @Override
     public void add(double x, double y, double w, double h, Runnable action) {
         hotspots.add(new Hotspot(x, y, w, h, KIND_CLICK,
-                action, null, null, null, null, null, null));
+                action, null, null, null, null, null, null, currentPlane));
     }
 
     @Override
     public void hover(double x, double y, double w, double h, Runnable action,
                       Runnable onEnter, Runnable onExit) {
         hotspots.add(new Hotspot(x, y, w, h, KIND_HOVER,
-                action, onEnter, onExit, null, null, null, null));
+                action, onEnter, onExit, null, null, null, null, currentPlane));
     }
 
     @Override
@@ -365,7 +480,7 @@ public final class ScreenManager implements HotspotSink, TouchGestures.PointerSi
                       java.util.function.BiConsumer<Double, Double> onMove,
                       Runnable action, Runnable onEnter, Runnable onExit) {
         hotspots.add(new Hotspot(x, y, w, h, KIND_TRACK,
-                action, onEnter, onExit, onMove, onMove, null, null));
+                action, onEnter, onExit, onMove, onMove, null, null, currentPlane));
     }
 
     @Override
@@ -373,7 +488,7 @@ public final class ScreenManager implements HotspotSink, TouchGestures.PointerSi
                      java.util.function.BiConsumer<Double, Double> onDrag,
                      java.util.function.BiConsumer<Double, Double> onPress) {
         hotspots.add(new Hotspot(x, y, w, h, KIND_DRAG,
-                null, null, null, null, onDrag, onPress, null));
+                null, null, null, null, onDrag, onPress, null, currentPlane));
     }
 
     @Override
@@ -392,7 +507,7 @@ public final class ScreenManager implements HotspotSink, TouchGestures.PointerSi
                      java.util.function.BiConsumer<Double, Double> onPress,
                      Runnable onEnter, Runnable onExit, Runnable onRelease) {
         hotspots.add(new Hotspot(x, y, w, h, KIND_DRAW,
-                null, onEnter, onExit, onMove, onDrag, onPress, onRelease));
+                null, onEnter, onExit, onMove, onDrag, onPress, onRelease, currentPlane));
     }
 
     // ------------------------------------------------------------ 指针事件（设计坐标）
@@ -400,7 +515,12 @@ public final class ScreenManager implements HotspotSink, TouchGestures.PointerSi
     /** 从后往前找最上层命中（后登记的在上层，与原节点树一致）。 */
     private int hit(double dx, double dy) {
         for (int i = hotspots.size() - 1; i >= 0; i--) {
-            if (hotspots.get(i).contains(dx, dy)) {
+            Hotspot h = hotspots.get(i);
+            double px = h.plane().srcX(dx, dy);
+            double py = h.plane().srcY(dx, dy);
+            if (h.contains(px, py)) {
+                hitX = px;
+                hitY = py;
                 return i;
             }
         }
@@ -409,6 +529,10 @@ public final class ScreenManager implements HotspotSink, TouchGestures.PointerSi
 
     /** 鼠标移动（未按键）：推进 enter/exit，TRACK/DRAW 回调指针位置。 */
     public boolean mouseMoved(double dx, double dy) {
+        UiDepth.pointer(dx, dy);
+        pointerX = dx;
+        pointerY = dy;
+        pointerInside = true;
         int found = hit(dx, dy);
         if (found != hovered) {
             if (hovered >= 0 && hovered < hotspots.size()) {
@@ -429,7 +553,7 @@ public final class ScreenManager implements HotspotSink, TouchGestures.PointerSi
         if (hovered >= 0) {
             Hotspot h = hotspots.get(hovered);
             if (h.onMove() != null && (h.kind() == KIND_TRACK || h.kind() == KIND_DRAW)) {
-                h.onMove().accept(dx, dy);
+                h.onMove().accept(hitX, hitY);
             }
             return true;
         }
@@ -438,6 +562,10 @@ public final class ScreenManager implements HotspotSink, TouchGestures.PointerSi
 
     /** 按下：DRAG/DRAW 的手势从这里开始，之后的所有拖动都归属这个热区。 */
     public boolean touchDown(double dx, double dy) {
+        UiDepth.pointer(dx, dy);
+        pointerX = dx;
+        pointerY = dy;
+        pointerInside = true;
         pressed = hit(dx, dy);
         if (pressed < 0) {
             activeDrag = null;
@@ -447,11 +575,11 @@ public final class ScreenManager implements HotspotSink, TouchGestures.PointerSi
         Hotspot h = hotspots.get(pressed);
         if ((h.kind() == KIND_DRAG || h.kind() == KIND_DRAW) && h.onPress() != null) {
             dragEvents = 0;
-            pressDesignX = dx;
-            pressDesignY = dy;
+            pressDesignX = hitX;
+            pressDesignY = hitY;
             trace(String.format("press  design %.2f,%.2f  scale %.4f  rect %.0f,%.0f",
-                    dx, dy, scale, h.x(), h.y()));
-            h.onPress().accept(dx, dy);
+                    hitX, hitY, scale, h.x(), h.y()));
+            h.onPress().accept(hitX, hitY);
         }
         updateCursor();
         return true;
@@ -460,15 +588,21 @@ public final class ScreenManager implements HotspotSink, TouchGestures.PointerSi
     /** 拖动（有键按着的移动）：事件固定派给按下时抓走的热区快照——
      *  热区整层重建（星图平移每帧一次）也不断手。 */
     public boolean touchDragged(double dx, double dy) {
+        UiDepth.pointer(dx, dy);
+        pointerX = dx;
+        pointerY = dy;
+        pointerInside = true;
         Hotspot h = activeDrag;
         if (h == null) {
             return false;
         }
         if (h.onDrag() != null) {
             dragEvents++;
+            double px = h.plane().srcX(dx, dy);
+            double py = h.plane().srcY(dx, dy);
             trace(String.format("dragS%d  design %.2f,%.2f  Δdesign %.2f,%.2f  scale %.4f",
-                    dragEvents, dx, dy, dx - pressDesignX, dy - pressDesignY, scale));
-            h.onDrag().accept(dx, dy);
+                    dragEvents, px, py, px - pressDesignX, py - pressDesignY, scale));
+            h.onDrag().accept(px, py);
         }
         return true;
     }
@@ -485,7 +619,8 @@ public final class ScreenManager implements HotspotSink, TouchGestures.PointerSi
         trace(String.format("release events=%d  Δdesign %.2f,%.2f  (scale %.4f)",
                 dragEvents, dx - pressDesignX, dy - pressDesignY, scale));
         if ((h.kind() == KIND_CLICK || h.kind() == KIND_HOVER || h.kind() == KIND_TRACK)
-                && h.contains(dx, dy) && h.action() != null) {
+                && h.contains(h.plane().srcX(dx, dy), h.plane().srcY(dx, dy))
+                && h.action() != null) {
             h.action().run();
         }
         if ((h.kind() == KIND_DRAW || h.kind() == KIND_DRAG) && h.onRelease() != null) {
@@ -574,24 +709,30 @@ public final class ScreenManager implements HotspotSink, TouchGestures.PointerSi
         }
         int kind = activeDrag != null ? activeDrag.kind()
                 : hovered >= 0 && hovered < hotspots.size() ? hotspots.get(hovered).kind() : -1;
-        Cursor.SystemCursor want = switch (kind) {
-            case KIND_CLICK, KIND_HOVER, KIND_TRACK, KIND_DRAG -> Cursor.SystemCursor.Hand;
-            case KIND_DRAW -> Cursor.SystemCursor.Crosshair;
-            default -> Cursor.SystemCursor.Arrow;
+        CursorArt.Mode want = switch (kind) {
+            case KIND_CLICK, KIND_HOVER, KIND_TRACK, KIND_DRAG -> CursorArt.Mode.HAND;
+            case KIND_DRAW -> CursorArt.Mode.CROSS;
+            default -> CursorArt.Mode.ARROW;
         };
-        if (want != lastCursor) {
-            Gdx.graphics.setSystemCursor(want);
-            lastCursor = want;
+        if (want != cursorMode) {
+            // 换形态 = 演一遍暴甲：记下旧形态，让 CursorArt 从它炸开
+            prevCursorMode = cursorMode;
+            cursorMode = want;
+            cursorMorph = 1.0;
         }
     }
 
-    private Cursor.SystemCursor lastCursor = Cursor.SystemCursor.Arrow;
-
     // ---------------------------------------------------------------- 拖动诊断
 
-    /** 拖动诊断：每次事件的坐标都记一行，同时打进 drag-trace.txt 与控制台（`-Dcard.trace=off` 关掉）。 */
-    private static final java.nio.file.Path TRACE_FILE = java.nio.file.Path.of("drag-trace.txt");
-    private static final boolean TRACE_ON = !"off".equalsIgnoreCase(System.getProperty("card.trace", "on"));
+    /**
+     * 拖动诊断：每次事件的坐标都记一行，同时打进 drag-trace.txt 与控制台（`-Dcard.trace=off` 关掉）。
+     *
+     * <p>安卓上默认关掉：{@code Path.of} 在 API 28 的真机上不存在（libcore 只有
+     * {@code Paths.get}），而且安卓的工作目录通常不可写。桌面照旧。</p>
+     */
+    private static final java.nio.file.Path TRACE_FILE = java.nio.file.Paths.get("drag-trace.txt");
+    private static final boolean TRACE_ON = !com.hysx.salvosequence.core.Platform.isAndroid()
+            && !"off".equalsIgnoreCase(System.getProperty("card.trace", "on"));
     private static int traceLines;
     private static double pressDesignX;
     private static double pressDesignY;
@@ -616,8 +757,8 @@ public final class ScreenManager implements HotspotSink, TouchGestures.PointerSi
             java.nio.file.Files.write(TRACE_FILE,
                     (line + System.lineSeparator()).getBytes(java.nio.charset.StandardCharsets.UTF_8),
                     java.nio.file.StandardOpenOption.CREATE, java.nio.file.StandardOpenOption.APPEND);
-        } catch (java.io.IOException ignored) {
-            // 诊断用，写不了就算了
+        } catch (Exception ignored) {
+            // 诊断用，写不了就算了（安卓上工作目录往往不可写）
         }
     }
 
@@ -630,7 +771,7 @@ public final class ScreenManager implements HotspotSink, TouchGestures.PointerSi
         try {
             java.nio.file.Files.write(TRACE_FILE, new byte[0],
                     java.nio.file.StandardOpenOption.CREATE, java.nio.file.StandardOpenOption.TRUNCATE_EXISTING);
-        } catch (java.io.IOException ignored) {
+        } catch (Exception ignored) {
             // 诊断用，写不了就算了
         }
     }
@@ -649,10 +790,14 @@ public final class ScreenManager implements HotspotSink, TouchGestures.PointerSi
      * 之上、调试读数与淡入淡出之下，所以换屏时跟着一起淡。</p>
      */
     private void drawBackButton(CanvasBuffer buffer) {
-        buffer.art().fillRect(BACK_X, BACK_Y, BACK_W, BACK_H, Palette.PANEL);
-        buffer.art().frame(BACK_X, BACK_Y, BACK_W, BACK_H, Palette.LINE_DIM);
+        // 星幕协议式的返回键：切角小片 + 单层琥珀框，压在左下角、与底部通栏同高
+        UiChrome.chamferFill(buffer.art(), BACK_X, BACK_Y + 2, BACK_W, BACK_H - 2, 3,
+                Palette.PANEL_ALT);
+        UiChrome.chamferFrame(buffer.art(), BACK_X, BACK_Y + 2, BACK_W, BACK_H - 2, 3,
+                Palette.AMBER_DIM);
+        UiChrome.chamferFill(buffer.art(), BACK_X + 3, BACK_Y + 6, 3, 8, 1, Palette.AMBER);
         String label = Language.t("返回", "BACK");
-        buffer.textCentered(label, BACK_X + BACK_W / 2.0, BACK_Y + 8, 12, Palette.LINE);
+        buffer.textCentered(label, BACK_X + BACK_W / 2.0 + 2, BACK_Y + 14, 12, Palette.LINE);
     }
 
     private void drawDebug(CanvasBuffer buffer) {

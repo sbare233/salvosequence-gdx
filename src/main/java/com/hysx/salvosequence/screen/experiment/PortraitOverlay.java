@@ -26,14 +26,17 @@ public final class PortraitOverlay {
     /** 素材路径（可以直接换成别的图）。 */
     private static final String RESOURCE = "/sprites/portrait.png";
 
-    /** 目标高度（设计像素）。画布高 360，256 差不多占七成，站着不顶天。 */
+    /** 目标高度（设计像素）：保持原尺寸，不缩小；宽度超出框的部分裁掉。 */
     private static final int TARGET_H = 256;
 
-    /** 脚底站在哪一行（设计像素）。留 20 给底部提示条。 */
-    private static final int FEET_Y = 338;
+    /** 立绘框的净宽（设计像素）：只有这么宽的可视区，多余的左右裁掉。 */
+    private static final int FRAME_W = 120;
 
-    /** 水平中心（设计像素）：贴左边站，但整幅留在画布内（宽度约 168，中心 100 → 左边 16）。 */
-    private static final int CX = 50;
+    /** 脚底站在哪一行（设计像素）：贴在棋盘上沿以下、手牌之上。 */
+    private static final int FEET_Y = 262;
+
+    /** 水平中心（设计像素）：立绘框（x 0..120）的水平中心。 */
+    private static final int CX = 60;
 
     /** 缩放后的图（构造时算好，绘制时 1:1 贴）。 */
     private final int[] scaled;
@@ -71,8 +74,10 @@ public final class PortraitOverlay {
         }
         // 调试开关走环境变量：PowerShell 会把 "-Dxxx.yyy=z" 从点号处拆开，
         // 所以命令行属性在这台机器上不可靠（AUDIT_LAYOUT 也是这个原因）。
-        // AUDIT_PORTRAIT=1  打开立绘
-        if ("true".equalsIgnoreCase(System.getenv("AUDIT_PORTRAIT"))) {
+        // AUDIT_PORTRAIT=1  打开立绘（截图工具走这个环境变量）
+        // -Dsalvo.portrait=true  同上，给 bash 里跑 exec:java 用
+        if ("true".equalsIgnoreCase(System.getenv("AUDIT_PORTRAIT"))
+                || "true".equalsIgnoreCase(System.getProperty("salvo.portrait"))) {
             this.visible = true;
         }
     }
@@ -115,9 +120,13 @@ public final class PortraitOverlay {
             art.frame(CX - scaledW / 2 - 10, FEET_Y - TARGET_H, 80, 24, Palette.DANGER);
             return;
         }
-        int dx = CX - scaledW / 2;
+        // 立绘保持原尺寸（不缩小），超宽的部分从左右两侧裁掉：框只有 120 宽，
+        // 所以取中间那段画，人物两侧的空白/衣摆被切掉，人和比例都还是原样。
+        int cropW = Math.min(scaledW, FRAME_W);
+        int srcX = (scaledW - cropW) / 2;
+        int dx = CX - cropW / 2;
         int dy = FEET_Y - scaledH;
-        art.blitArgbTile(scaled, scaledW, scaledH, 0, 0, dx, dy, scaledW, scaledH,
+        art.blitArgbTile(scaled, scaledW, scaledH, srcX, 0, dx, dy, cropW, scaledH,
                 false, false, false, 1.0);
     }
 

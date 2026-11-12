@@ -153,7 +153,7 @@ public final class AudioProbe {
             if (in == null) {
                 throw new IllegalStateException("类路径上找不到 " + path);
             }
-            return in.readAllBytes();
+            return com.hysx.salvosequence.core.Io.readAll(in);
         }
     }
 

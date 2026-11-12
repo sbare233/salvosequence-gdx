@@ -8,6 +8,36 @@ package com.hysx.salvosequence.gleba.gen;
 public final class Climate {
     private static final float EARTH_RADIUS_KM = 6371f;
 
+    /**
+     * 极简气候：不做风场与平流，只按纬度 + 海拔给温度和降水。
+     *
+     * <p>比完整 {@link #build} 便宜两个数量级（一次线性遍历），代价是没有大陆内部的
+     * 雨影/洋流细节——远处的海岸线因此更"规则"。用于"不跑气候"档：星球仍有赤道雨林、
+     * 副热带荒漠、极地冰盖，只是不模拟环流。</p>
+     */
+    public static void quick(SphereGrid g, PlanetParams p, PlanetData d) {
+        PlanetTheme th = p.theme == null ? PlanetTheme.EARTH : p.theme;
+        for (int t = 0; t < g.tiles; t++) {
+            float latAbs = Math.abs(g.latDeg[t]);
+            float elev = Math.max(0f, d.elevation[t]);
+            // 温度：赤道 30℃，极地 -25℃，每升高 1000 m 降 6℃
+            float temp = 30f - 55f * (float) Math.pow(latAbs / 90f, 1.35f) - elev * 0.006f;
+            // 降水：赤道辐合带 + 中纬风暴带，副热带干旱
+            float itcz = (float) Math.exp(-Math.pow(latAbs / 26f, 2.0));
+            float storm = (float) Math.exp(-Math.pow((latAbs - 55f) / 20f, 2.0));
+            float rain = 2400f * itcz + 900f * storm + 120f;
+            if (d.land[t]) {
+                rain *= 0.85f;
+            }
+            // 主题偏移（与完整气候同一口径：冰封星更冷、荒漠星更干）
+            temp += th.tempOffset;
+            rain *= th.rainScale;
+            d.tempC[t] = temp;
+            d.rainMm[t] = rain;
+            d.continentality[t] = 0.3f;
+        }
+    }
+
     public static void build(SphereGrid g, PlanetParams p, PlanetData d, Noise noise, int steps) {
         final int n = g.tiles;
 
@@ -59,6 +89,8 @@ public final class Climate {
             float cont = d.continentality[t];
             temp -= cont * 9f * f;
             if (!d.land[t]) temp = temp * 0.92f + 1.5f; // 海洋热惯性
+            // 星球类型：冰封型整体降温、荒漠型升温（雪线与森林线会跟着自己移动）
+            temp += (p.theme == null ? 0f : p.theme.tempOffset);
             d.tempC[t] = temp;
             float snow = 0f;
             if (temp < 0f) snow = Math.min(1f, -temp / 9f);
@@ -114,6 +146,7 @@ public final class Climate {
                 rain[t] += m * 2600f;
             }
         }
-        for (int t = 0; t < n; t++) d.rainMm[t] = Math.max(0f, rain[t]);
+        float rainScale = p.theme == null ? 1f : p.theme.rainScale;
+        for (int t = 0; t < n; t++) d.rainMm[t] = Math.max(0f, rain[t] * rainScale);
     }
 }

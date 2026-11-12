@@ -12,6 +12,7 @@ java -jar target/SalvoSequenceGdx.jar
 ```
 
 常用按键：`F11` 切全屏 · `Ctrl+W` 回 1280x720 窗口 · `Ctrl+Q` 退出 · `C` 直达组舰者 · `F1` 调试 · `F4` 素材实验室。
+战斗中：`F2` 逐条翻 52 个背景机位（星云/恒星/星球/脉冲星/黑洞 × 近/中/远构图，临时覆盖本场随机结果） · `F3` 循环星球类型。
 
 系统属性：`-Dsalvosequence.windowed=true` 窗口启动；`-Dsalvosequence.music=battle` 试听战斗曲；
 `-Dcard.seed=20240601` 固定种子。
@@ -301,6 +302,51 @@ Android/data/com.hysx.salvosequence/files/backdrops/custom/
 - **图片加载**：JavaFX `Image` 全部换成 `core.PngLoader`（libGDX Pixmap 解码 → 非预乘 ARGB）。
 - **音频**：不变，仍是 JDK 自带 `javax.sound.sampled` / MIDI 合成。
 
+## 界面用 Aseprite 画（ui/）
+
+界面元素的"在哪、多大、点哪里"可以不在代码里写死，而是用 **Aseprite** 画好导出，游戏直接读。
+Aseprite 本身就是最顺手的像素界面编辑器（图层、参考图、切片都能用），没必要再造一个。
+
+约定（画的时候照这个来）：
+
+- 画布就是界面尺寸 **640×360**；
+- **贴图图层**用 `img.` 前缀，名字后半段是元素 id：`img.panel.left`、`img.gear`、`img.info.box`、`img.card.slot.0`；
+- **切片**（Slice）用**裸 id** 命名：`panel.left`、`gear`、`info.box`、`card.slot.0` —— 切片的矩形就是元素的绘制区域 + 点击热区；
+- 想标注"这块是热区"又不画像素，就把空图层放进 `hotspots` 组，命名 `hit.<id>`（游戏不读这些图层）；
+- 于是：**切片管"在哪、点哪里"，`img.` 图层管"长什么样"**，两者可以分开改。
+
+导出（一条命令，图层名和切片一起写进 JSON）：
+
+```bash
+tools/ase-export.sh                       # 导出 ui/ 下所有 .aseprite
+tools/ase-export.sh ui/battle.aseprite    # 只导一张
+# 等价于：
+# aseprite -b ui/battle.aseprite --list-layers --list-slices \
+#          --sheet ui/battle.png --data ui/battle.json --format json-array
+```
+
+游戏侧读法（`core/AseUi`）：
+
+```java
+AseUi ui = AseUi.active();             // 读 -Dsalvo.ase=ui/battle.json（或给目录 + -Dsalvo.ase.screen）
+int[] r = ui.slice("card.slot.0");     // 热区 {x,y,w,h}；没有这个切片返回 null
+int[] tex = ui.texture("gear");        // 贴图矩形：有切片且画了 img.gear 图层才返回
+ui.drawTexture(art, "gear");           // 按切片位置贴到画布上（透明处保留底下的画）
+```
+
+已经接上贴图的元素：左下梯形面板 `panel.left`、齿轮 `gear`、右下信息框 `info.box`
+（`CardLoopScreen.drawAseTexture(art, id)`：有贴图就贴、没有就画代码里的图形）。
+
+不传 `-Dsalvo.ase` 就完全走代码里的默认几何，所以布局文件是可选的增强。
+目前接上的是战斗卡槽 `card.slot.0..6`（`CardLoopScreen.cardBarRect` 先查切片、再查 `.uilab`、最后退回常量），
+绘制和热区共用这一个函数，挪一下两者一起动。
+
+`ui/battle.json` + `ui/battle.png` 是仓库里附的一份样例（12 个切片，其中 `card.slot.0` 故意挪到棋盘中央），
+配 `-Dsalvo.ase=ui/battle.json` 启动就能看到第一张卡换位置。
+
+> 没有 Aseprite、只想手摆热区的话，`D:\projects\uilab` 里还有个小工具能存 `.uilab`，
+> 游戏侧的 `core/UiLayout` 也照读——两条路并存，Aseprite 优先。
+
 ## 工具（tools/）
 
 - `CardLoopApp`：直达组舰者玩法循环的可玩入口
@@ -308,6 +354,7 @@ Android/data/com.hysx.salvosequence/files/backdrops/custom/
 - `CardLoopAudit`：固定种子把一局从选舰驱动到编入，导 11 张核对稿
 - `FlickerAudit`：文本闪烁逐帧导图
 - `SpriteExport` / `OutlineLab` / `ModuleLab` / `ShipLab` / `AudioSelfTest` / `AudioProbe`：素材导出与自检
+- `ase-export.sh`：把 `ui/*.aseprite` 导成界面数据（见上节）
 
 ## 彩蛋：人物立绘（F12）
 

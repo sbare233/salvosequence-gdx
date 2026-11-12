@@ -49,6 +49,7 @@ public final class PlanetGenerator {
 
         SphereGrid grid = new SphereGrid(p.faceRes);
         PlanetData d = new PlanetData(grid);
+        d.theme = p.theme == null ? PlanetTheme.EARTH : p.theme;
         long t1 = System.nanoTime();
 
         Noise noise = new Noise(p.seed);
@@ -78,9 +79,9 @@ public final class PlanetGenerator {
         if (p.climateEnabled) {
             Climate.build(grid, p, d, noise, Math.max(4, p.advectionSteps));
         } else {
-            java.util.Arrays.fill(d.tempC, 10f);
-            java.util.Arrays.fill(d.rainMm, 600f);
-            java.util.Arrays.fill(d.continentality, 0.3f);
+            // 「不跑气候」档：按纬度/海拔的解析气候，仍然有雨林—荒漠—冰盖的分布，
+            // 但不做风场平流（省掉整段最贵的计算）
+            Climate.quick(grid, p, d);
         }
         long t5 = System.nanoTime();
 

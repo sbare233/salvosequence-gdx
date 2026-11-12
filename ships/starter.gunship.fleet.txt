@@ -1,9 +1,9 @@
 # hullbreaker fleet v1
 id starter.gunship
-name 「领航员」岚
-ship comb.bz2 1 6 4
-ship eagle.congress 1 3 1
-ship dyn.louis 1 3 4
-ship rep.genoa 1 5 7
-ship south.sextant 1 3 7
-ship rep.hansa 1 0 5
+name 炮术舰队
+ship armor.belt 1 4 0
+ship gun.main 1 4 2
+ship gun.vulcan 1 2 2
+ship engine.reactor 1 8 2
+ship tactic.ew 1 8 4
+ship core.command 1 0 4

@@ -44,7 +44,7 @@ public final class PixelText {
                 System.out.println("pixel font resource missing: " + FONT_RESOURCE);
                 throw new IllegalStateException("missing");
             }
-            byte[] bytes = in.readAllBytes();
+            byte[] bytes = Io.readAll(in);
             System.out.println("[font] read " + bytes.length + " bytes from " + src);
             if (bytes.length == 0) {
                 throw new IllegalStateException("empty");

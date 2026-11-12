@@ -16,6 +16,8 @@ public final class PlanetData {
     public final float[] continentality;  // 0=海洋性, 1=极端大陆性
     public final byte[] koppen;           // Köppen 分类索引
     public final float[] snow;            // 雪/冰覆盖 0..1
+    /** 生成时使用的星球类型（配色与云量都从它取）。 */
+    public PlanetTheme theme = PlanetTheme.EARTH;
 
     public PlanetData(SphereGrid grid) {
         this.grid = grid;

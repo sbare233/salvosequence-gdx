@@ -1,7 +1,6 @@
 package com.hysx.salvosequence.core;
 
 import com.badlogic.gdx.graphics.Pixmap;
-import com.badlogic.gdx.utils.GdxNativesLoader;
 
 import java.io.ByteArrayOutputStream;
 import java.io.IOException;
@@ -30,7 +29,7 @@ public final class PngLoader {
         }
     }
 
-    private static boolean nativesReady;
+    private static volatile boolean nativesReady;
 
     private PngLoader() {
     }
@@ -84,10 +83,41 @@ public final class PngLoader {
         return out.toByteArray();
     }
 
+    /**
+     * 桌面端要先加载 gdx 的动态库，{@link Pixmap} 的 PNG 解码走的就是它
+     * （Gdx2DPixmap 是 native 的）。
+     *
+     * <p>安卓上不能走这条路：{@code AndroidApplication} 启动时已经
+     * {@code System.loadLibrary("gdx")} 装好了，再调桌面版的
+     * {@code GdxNativesLoader.load()} 会去碰 {@code SharedLibraryLoader}——
+     * 那个类在 gdx 1.13 里被拆成了单独的 {@code gdx-jnigen-loader} 依赖，
+     * 手打 APK 的 d8 输入里没有，于是一进星图就
+     * {@code NoClassDefFoundError: SharedLibraryLoader}。</p>
+     *
+     * <p>加载代码单独放在 {@link DesktopNatives} 里：安卓上这个内部类根本不会被解析，
+     * 也就不会去解析 {@code GdxNativesLoader} 那个方法引用。</p>
+     */
     private static void ensureNatives() {
-        if (!nativesReady) {
-            GdxNativesLoader.load();
+        if (nativesReady) {
+            return;
+        }
+        // 先加载、后置标记：星盘的解码在后台线程跑，标记提前置上会让主线程
+        // 在 native 库还没就绪时就去碰 Pixmap（UnsatisfiedLinkError）
+        synchronized (PngLoader.class) {
+            if (nativesReady) {
+                return;
+            }
+            if (!Platform.isAndroid()) {
+                DesktopNatives.load();
+            }
             nativesReady = true;
+        }
+    }
+
+    /** 只在桌面端加载 gdx 动态库；安卓端不解析这个类。 */
+    private static final class DesktopNatives {
+        static void load() {
+            com.badlogic.gdx.utils.GdxNativesLoader.load();
         }
     }
 }

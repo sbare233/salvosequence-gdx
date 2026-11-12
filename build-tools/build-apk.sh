@@ -60,7 +60,14 @@ fi
 BACKEND_DEX_JAR="$DEPS/gdx-backend-android-$VER-slim.jar"
 python build-tools/strip_class.py "$BACKEND_JAR" "$BACKEND_DEX_JAR" \
   com.badlogic.gdx.backends.android.keyboardheight.AndroidXKeyboardHeightProvider
-CP="$AJAR:$GDX_JAR:$BACKEND_JAR:$VFX_CORE:$VFX_FX"
+# gdx 1.13 把 SharedLibraryLoader 拆到了 gdx-jnigen-loader：GdxNativesLoader.load() 会用它。
+# 桌面端由 maven 传递依赖带进来，手打 APK 的 d8 输入没有它 -> 一调就 NoClassDefFoundError。
+JNIGEN="$M2/com/badlogicgames/gdx/gdx-jnigen-loader/2.5.2/gdx-jnigen-loader-2.5.2.jar"
+if [ ! -s "$JNIGEN" ]; then
+  grab "https://repo.maven.apache.org/maven2/com/badlogicgames/gdx/gdx-jnigen-loader/2.5.2/gdx-jnigen-loader-2.5.2.jar" "$DEPS/gdx-jnigen-loader-2.5.2.jar"
+  JNIGEN="$DEPS/gdx-jnigen-loader-2.5.2.jar"
+fi
+CP="$AJAR:$GDX_JAR:$JNIGEN:$BACKEND_JAR:$VFX_CORE:$VFX_FX"
 
 # ---------------------------------------------------------------- 编译
 echo "[apk] 编译（--release 21，排除桌面专用源码）"
@@ -94,7 +101,7 @@ mkdir -p "$OUT/dex"
 java -cp "$BT/lib/d8.jar" com.android.tools.r8.D8 \
   --lib "$AJAR" --min-api "$MIN_API" \
   --output "$OUT/dex" \
-  "$OUT/app-classes.jar" "$GDX_JAR" "$BACKEND_DEX_JAR" "$VFX_CORE" "$VFX_FX"
+  "$OUT/app-classes.jar" "$GDX_JAR" "$JNIGEN" "$BACKEND_DEX_JAR" "$VFX_CORE" "$VFX_FX"
 
 # ---------------------------------------------------------------- 资源
 echo "[apk] 收集 assets"

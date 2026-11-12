@@ -248,7 +248,7 @@ final class SoundClip {
             AudioInputStream converted = AudioSystem.isConversionSupported(mono16, src)
                     ? AudioSystem.getAudioInputStream(mono16, raw)
                     : raw;
-            byte[] bytes = converted.readAllBytes();
+            byte[] bytes = com.hysx.salvosequence.core.Io.readAll(converted);
             if (converted != raw) {
                 converted.close();
             }
@@ -269,7 +269,7 @@ final class SoundClip {
     static short[] readPcm(byte[] bytes) throws IOException, UnsupportedAudioFileException {
         try (AudioInputStream in = AudioSystem.getAudioInputStream(
                 new ByteArrayInputStream(bytes))) {
-            byte[] raw = in.readAllBytes();
+            byte[] raw = com.hysx.salvosequence.core.Io.readAll(in);
             short[] out = new short[raw.length / 2];
             for (int i = 0; i < out.length; i++) {
                 out[i] = (short) ((raw[i * 2] & 0xFF) | (raw[i * 2 + 1] << 8));

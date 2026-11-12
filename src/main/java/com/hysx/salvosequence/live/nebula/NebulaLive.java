@@ -43,10 +43,17 @@ public final class NebulaLive {
     private final Vector3 camUp = new Vector3();
 
     private boolean ready;
-    /** 手动相机：不再随时间自动环绕（背景工坊里用指针拖、滚轮缩放）。 */
-    private float distance = 1.30f;
-    private float yawDeg = -118.0f;
-    private float pitchDeg = 9.0f;
+    /**
+     * 相机基线：只受手动控制（拖拽/滚轮/存档），但 {@link Params#autoOrbit} 会在基线上叠加一个
+     * 随时间增长的水平转角，所以战斗里的机位会一直缓慢地绕云转，而不是一张死图。
+     *
+     * <p>默认机位停在气壳外面一点（dist 1.25，气壳半径 1.0、体积半径 1.52）：在壳里 0.9 时
+     * 绕到气缝那一侧会整屏发黑，退到 2.0 以上整朵云又缩成一小团；1.25 绕一圈都是同一团云的
+     * 不同面，工坊里能像转台一样自由查看，战斗底图也还是一整片云。</p>
+     */
+    private float distance = 1.25f;
+    private float yawDeg = -93.0f;
+    private float pitchDeg = 14.0f;
 
     /** 用固定种子生成星点、烤一张噪声体积；必须在 GL 线程调用（首次渲染时惰性执行）。 */
     public void ensureGl() {
@@ -89,9 +96,33 @@ public final class NebulaLive {
         Gdx.gl.glBindTexture(GL20.GL_TEXTURE_2D, 0);
     }
 
-    /** 相机只受手动控制（拖拽/滚轮/存档），不随时间环绕。 */
-    private void updateCamera() {
-        float yawR = yawDeg * MathUtils.degreesToRadians;
+    /**
+     * 自动水平漂移的累计角（度）。
+     *
+     * <p>以前是直接算 {@code time * autoOrbit}：时间是"从头到现在"的总秒数，于是 1) 拖拽只是
+     * 改了基线，画面照样按秒滑走，视角永远抓不住；2) 开关一改，画面会瞬移一个累计角。
+     * 改成逐帧累加之后，漂移只是缓慢叠加在基线上，关掉就是真停住，拖到哪就停在哪。</p>
+     */
+    private float orbitPhase;
+    private boolean driftEnabled = true;
+    private double lastTime = -1;
+
+    /** 预览（背景工坊）里关掉自动漂移，方便把机位停在某个角度细看。 */
+    public void setDriftEnabled(boolean on) {
+        driftEnabled = on;
+    }
+
+    private void updateCamera(double time) {
+        if (lastTime < 0) {
+            lastTime = time;
+        }
+        double dt = time - lastTime;
+        lastTime = time;
+        if (driftEnabled && dt > 0 && dt < 0.5) {
+            orbitPhase += (float) (dt * params.autoOrbit);
+            orbitPhase = wrapDeg(orbitPhase);
+        }
+        float yawR = (yawDeg + orbitPhase) * MathUtils.degreesToRadians;
         float pitchR = pitchDeg * MathUtils.degreesToRadians;
         float dist = distance;
         float cx = dist * MathUtils.cos(pitchR) * MathUtils.cos(yawR);
@@ -113,12 +144,33 @@ public final class NebulaLive {
     }
 
     public void orbit(double dx, double dy) {
-        yawDeg -= (float) dx * 0.35f;
-        pitchDeg = MathUtils.clamp(pitchDeg + (float) dy * 0.25f, -80f, 80f);
+        yawDeg = wrapDeg(yawDeg - (float) dx * 0.35f);
+        pitchDeg = MathUtils.clamp(pitchDeg + (float) dy * 0.25f, -88f, 88f);
     }
 
+    /**
+     * 把角度收进 [-180,180)。
+     *
+     * <p>不收的话拖一分钟偏航就跑到七百多度：读数看不懂，存档也跟着脏，而且
+     * {@code time * autoOrbit} 那套旧算法和它对不上时画面会莫名其妙跳一下。</p>
+     */
+    private static float wrapDeg(float deg) {
+        float d = deg % 360f;
+        return d >= 180f ? d - 360f : d < -180f ? d + 360f : d;
+    }
+
+    /**
+     * 相机能停的范围。
+     *
+     * <p>下限 0.45 是在气团里穿行（贴图会被气壁糊满），上限 3.5 是退到球外看整朵云。
+     * 之前夹到 1.42 是因为"退远了全黑"——那是 sphereSize 被调小、相机跑到很小的云外面
+     * 才黑；球还是 1.55 时退到 1.5~3.4 其实能完整看到星云，所以放开给工坊自由观察。</p>
+     */
+    private static final float MIN_DIST = 0.45f;
+    private static final float MAX_DIST = 3.50f;
+
     public void zoom(double notches) {
-        distance = MathUtils.clamp((float) (distance * Math.pow(1.0015, -notches * 40.0)), 0.45f, 3.5f);
+        distance = MathUtils.clamp((float) (distance * Math.pow(1.0015, -notches * 40.0)), MIN_DIST, MAX_DIST);
     }
 
     public double[] camera() {
@@ -126,15 +178,15 @@ public final class NebulaLive {
     }
 
     public void setCamera(double yaw, double pitch, double dist) {
-        yawDeg = (float) yaw;
-        pitchDeg = (float) Math.max(-80, Math.min(80, pitch));
-        distance = (float) Math.max(0.45, Math.min(3.5, dist));
+        yawDeg = wrapDeg((float) yaw);
+        pitchDeg = (float) Math.max(-88, Math.min(88, pitch));
+        distance = (float) Math.max(MIN_DIST, Math.min(MAX_DIST, dist));
     }
 
     /** 渲染一帧到 320×180 的 ARGB（非预乘、y 向下），失败时返回 null。 */
     public int[] render(double time) {
         ensureGl();
-        updateCamera();
+        updateCamera(time);
 
         scene.begin();
         Gdx.gl.glClearColor(0.004f, 0.005f, 0.009f, 1f);

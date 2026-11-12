@@ -14,7 +14,10 @@ import com.hysx.salvosequence.core.PixelArt;
 import com.hysx.salvosequence.core.PixelFont;
 import com.hysx.salvosequence.core.PngLoader;
 import com.hysx.salvosequence.core.StarDisk;
+import com.hysx.salvosequence.core.UiChrome;
+import com.hysx.salvosequence.core.UiTilt;
 import com.hysx.salvosequence.deck.Card;
+import com.hysx.salvosequence.deck.CardKind;
 import com.hysx.salvosequence.deck.CardCatalog;
 import com.hysx.salvosequence.fleet.FactionCatalog;
 import com.hysx.salvosequence.fleet.Fleet;
@@ -62,15 +65,28 @@ public final class CardLoopScreen implements Screen {
 
     private static final int BOARD_CELL = 16;
     private static final int BOARD_SPAN = FleetBoard.SIZE * BOARD_CELL;   // 256
-    private static final int BOARD_Y = 18;
-    /** 战斗里我方棋盘（左中）：左边 0~122 留给状态栏和舰长技按钮。 */
-    private static final int OUR_BOARD_X = 122;
-    /** 战斗里敌方棋盘（最右）：右缘留 2px。 */
-    private static final int ENEMY_BOARD_X = 382;
-    /** 战术休整/太空港只有一块盘面，挪到最右，中间让给面板。 */
-    private static final int PORT_BOARD_X = 382;
-    /** 战术休整/太空港的面板左缘（宽度 = PORT_BOARD_X - 4 - PORT_PANEL_X = 256）。 */
-    private static final int PORT_PANEL_X = 122;
+
+    /**
+     * 全局版面偏移：战斗 / 战术休整 / 太空港三屏的棋盘和面板都从这一组值推出来，
+     * 想让整块版面一起挪，只改这两个数就够了。
+     */
+    private static final int LAYOUT_DX = 0;
+    private static final int LAYOUT_DY = 0;
+
+    /**
+     * 棋盘的顶边不贴屏幕顶：整块棋盘要绕画布中心倾斜，留出这段余量，
+     * 左上角转上去才不会撞到屏幕外被切掉。
+     */
+    private static final int BOARD_Y = 6 + LAYOUT_DY;
+    /** 我方棋盘（三屏同一个位置）：左边 0~126 留给面板、技能、跳过。 */
+    private static final int OUR_BOARD_X = 126 + LAYOUT_DX;
+    /** 敌方棋盘（战斗）／面板（休整、太空港）的左缘：右缘统一留 2px。 */
+    private static final int ENEMY_BOARD_X = 383 + LAYOUT_DX;
+    /** 战术休整/太空港只有一块盘面，用的就是战斗里我方棋盘的位置。 */
+    private static final int PORT_BOARD_X = OUR_BOARD_X;
+    /** 战术休整/太空港的面板占的是战斗里敌方棋盘那一块。 */
+    private static final int PORT_PANEL_X = ENEMY_BOARD_X;
+    private static final int PORT_PANEL_W = 640 - 2 - PORT_PANEL_X;
 
     private static final int FOE_PANEL_X = 428;
     private static final int FOE_PANEL_Y = 20;
@@ -95,12 +111,71 @@ public final class CardLoopScreen implements Screen {
     private static final int SKILL_BTN_Y = 72;
     private static final int TURN_BTN_Y = 94;
 
-    private static final int CARD_X = 2;
-    private static final int CARD_Y = 288;
-    private static final int CARD_SIZE = 44;
-    private static final int CARD_GAP = 6;
-    private static final int CARD_COLS = 6;
-    private static final int CARD_MAX = 12;
+    // ---- 新版战斗界面（按参考图重排）----------------------------------
+    /** 左上信息框（航程 / 双方结构值 / 设置齿轮）。 */
+    private static final int PANEL_W = 142;
+    private static final int PANEL_H = 67;
+    /** 梯形面板右下角的顶点（上缘通到 PANEL_W，下缘收到这里）。 */
+    private static final int PANEL_TRAP_X = 75;
+    private static final int GEAR_X = 94;
+    private static final int GEAR_Y = 6;
+    private static final int GEAR_S = 18;
+    private static final int ROUTE_Y = 65;
+    /** 左上角两条结构条的第一行（8px 拉丁小字的顶端）。 */
+    private static final int VITALS_Y = 24;
+
+    /** 舰长技能：底部指令台左侧操作轨上的大菱形按钮。 */
+    private static final int SKILL_CX = 21;
+    private static final int SKILL_CY = 288;
+    private static final int SKILL_R = 17;
+    /** 舰船技：技能菱形右边的小菱形（有舰船技时才画）。 */
+    private static final int SHIP_CX = 70;
+    private static final int SHIP_CY = 296;
+    private static final int SHIP_R = 13;
+
+    /** 跳过回合：菱形按钮，与舰长技同一套结构（外框是 32×30 的热区，菱形 r=14）。
+     *  放在操作轨最下面一格，能量点因此挪到中间。 */
+    private static final int SKIP_X = 5;
+    private static final int SKIP_Y = 327;
+    private static final int SKIP_W = 32;
+    private static final int SKIP_H = 30;
+    private static final int SKIP_R = 14;
+
+    /** 剩余能量：操作轨中间一排菱形点，水平按 {@link #RAIL_X} 居中。 */
+    private static final int ENERGY_CX = 21;
+    private static final int ENERGY_Y = 317;
+
+    /** 底部指令台：整块板托住操作轨和手牌，不再让卡片浮在星云上。 */
+    private static final int CONSOLE_X = 0;
+    private static final int CONSOLE_Y = 268;
+    private static final int CONSOLE_W = 332;
+    private static final int CONSOLE_H = 92;
+    /** 操作轨与手牌区之间的竖隔断。 */
+    private static final int RAIL_X = 41;
+
+    /** 指令卡：长条，3 列 × 3 行。 */
+    private static final int CARD_X = 45;
+    private static final int CARD_Y = 285;
+    private static final int CARD_W = 93;
+    private static final int CARD_H = 21;
+    /**
+     * 卡牌的位置：指令台里排成三列三行（左边 41px 是操作轨，卡片从 45 起）。
+     * 三列 93px、列距 3px，正好落在 45~330 之间。
+     */
+    private static final int[][] CARD_SLOTS = {
+            {45, 285}, {141, 285}, {237, 285},
+            {45, 309}, {141, 309}, {237, 309},
+            {45, 333}, {141, 333}, {237, 333},
+    };
+    private static final int CARD_MAX = CARD_SLOTS.length;
+    /** 四角斜切：每个角切掉腰长 6 的三角形（21px 高的条不能切太深，否则两头收成尖）。 */
+    private static final int CARD_CHAMFER = 6;
+
+    /** 右下读数据：双方结构条 + 一行属性 + 航程 + 战报（没有铭牌）。 */
+    private static final int INFO_X = 334;
+    private static final int INFO_Y = 268;
+    private static final int INFO_W = 304;
+    private static final int INFO_H = 92;
 
     /** 描述弹窗宽度：跟随鼠标半屏换边（左半 → 右侧弹出，右半 → 左侧弹出）。 */
     private static final int DESC_W = 232;
@@ -148,8 +223,13 @@ public final class CardLoopScreen implements Screen {
     private int slotPreview;
     private boolean hotspotsDirty;
     private int hoveredCard = -1;
+    /** 说明浮牌这次翻到了卡片下方（上方放不下时）。 */
+    private boolean cardPopupBelow;
     private int hoveredOption = -1;
     private boolean hoveredSkill;
+    /** 左上设置齿轮 / 左下跳过回合 是否被指到。 */
+    private boolean hoveredGear;
+    private boolean hoveredTurn;
     private int hoveredOurShip = -1;
     private int hoveredFoe = -1;
     private int spacePortTab = 0;
@@ -167,6 +247,15 @@ public final class CardLoopScreen implements Screen {
     private int[] liveBackdropSource;
     private int liveBackdropDim = -1;
 
+    /**
+     * 这一场战斗随机到的天体底图（0..3）与掷骰时的关卡/节点：换关或进新节点才重掷，
+     * 一场仗从头到尾只换一次背景。{@code -1} = 还没掷过。
+     */
+    private int liveScene = -1;
+    private int liveSceneNode = Integer.MIN_VALUE;
+    private int liveSceneVisits = -1;
+    private java.util.Random liveSceneRng;
+
     /** 盘面闪烁星：{theta, radius, phase, speed, brightness} × N，构造一次，之后只按时间求亮度。 */
     private double[][] diskTwinkles;
     /** 上一帧指针位置（设计坐标）：拖动旋转星盘用。 */
@@ -178,7 +267,7 @@ public final class CardLoopScreen implements Screen {
     private boolean settingsOpen;
     private int settingsCursor;
     /** 设置项：0=继续 1=音乐 2=音效 3=扫描线 4=形状 5=时机 6=格栅 7=风格化 8=背景滤镜 9=语言 10=返回标题 11=退出游戏。 */
-    private static final int SETTINGS_ITEMS = 12;
+    private static final int SETTINGS_ITEMS = 14;
     /** 主题背景静态层（Backdrops：10 主题 × 4 变体，按节点确定性选播）。 */
     private int[] backdropLayer;
     private int backdropKey = -1;
@@ -216,6 +305,10 @@ public final class CardLoopScreen implements Screen {
     private int dragCellY = -1;
     private String toast = "";
     private double toastLife;
+    /** 本场战斗抽中的机位（场景 + 相机 + 星球类型），换节点时重掷一次。 */
+    private com.hysx.salvosequence.live.CameraPresets.Preset livePreset;
+    /** 调试键 F2 钉死的机位下标（-1 = 没钉）。 */
+    private int debugPresetIndex = -1;
     private double time;
     /** 锁定动画：目标一变（进战斗 / 打沉换目标 / 手动切换）就从四角射一次箭矢。 */
     private Battle lockBattle;
@@ -237,7 +330,7 @@ public final class CardLoopScreen implements Screen {
 
     private static long initialSeed() {
         String prop = System.getProperty("card.seed", System.getenv("CARD_SEED"));
-        if (prop != null && !prop.isBlank()) {
+        if (prop != null && !prop.trim().isEmpty()) {
             try {
                 return Long.parseLong(prop.trim());
             } catch (NumberFormatException e) {
@@ -285,6 +378,22 @@ public final class CardLoopScreen implements Screen {
         ScreenContext next = pendingTransition;
         pendingTransition = null;
         return next;
+    }
+
+    /** 战斗界面不显示全局返回键：左下角那个位置是"跳过回合"的三角按钮。 */
+    @Override
+    public boolean wantsGlobalBackButton() {
+        return stage() != Run.Stage.BATTLE;
+    }
+
+    /**
+     * 画了棋盘的那几种版面，立绘由本界面在棋盘之后、其余 UI 之前画（棋盘在最底下）。
+     *
+     * <p>星图整屏、放大舰船、事件界面不画棋盘，交回 {@code ScreenManager} 画在最上层。</p>
+     */
+    @Override
+    public boolean drawsPortraitUnderUi() {
+        return !zoomShip && !starMapVisible() && stage() != Run.Stage.EVENT;
     }
 
     @Override
@@ -554,6 +663,41 @@ public final class CardLoopScreen implements Screen {
 
     @Override
     public ScreenContext onKey(String code) {
+        // 调试键：F2 逐个翻机位（48 条，含近地轨道/恒星远近），F3 换星球类型
+        if ("F2".equals(code)) {
+            int n = com.hysx.salvosequence.live.CameraPresets.count();
+            debugPresetIndex = (debugPresetIndex + 1) % n;
+            com.hysx.salvosequence.live.CameraPresets.Preset p =
+                    com.hysx.salvosequence.live.CameraPresets.get(debugPresetIndex);
+            com.hysx.salvosequence.live.LiveBackdrops.applyPreset(p);
+            liveScene = p.scene;
+            liveSceneNode = run.node();
+            liveSceneVisits = run.visitedCount();
+            say("机位 " + (debugPresetIndex + 1) + "/" + n + "：" + p.label);
+            return null;
+        }
+        if ("F3".equals(code)) {
+            var themes = com.hysx.salvosequence.gleba.gen.PlanetTheme.values();
+            int next = (com.hysx.salvosequence.live.LiveBackdrops.planetTheme().ordinal() + 1) % themes.length;
+            // 当前不在星球场景时，先换到"星球·全貌"那条机位，再套主题
+            if (com.hysx.salvosequence.live.LiveBackdrops.preset() == null
+                    || com.hysx.salvosequence.live.LiveBackdrops.preset().scene != 2) {
+                for (int i = 0; i < com.hysx.salvosequence.live.CameraPresets.count(); i++) {
+                    if (com.hysx.salvosequence.live.CameraPresets.get(i).scene == 2) {
+                        debugPresetIndex = i;
+                        com.hysx.salvosequence.live.LiveBackdrops.applyPreset(
+                                com.hysx.salvosequence.live.CameraPresets.get(i));
+                        break;
+                    }
+                }
+            }
+            com.hysx.salvosequence.live.LiveBackdrops.setPlanetTheme(themes[next]);
+            liveScene = 2;
+            liveSceneNode = run.node();
+            liveSceneVisits = run.visitedCount();
+            say("星球类型：" + themes[next].zh);
+            return null;
+        }
         if (settingsOpen) {
             return settingsKey(code);
         }
@@ -754,7 +898,7 @@ public final class CardLoopScreen implements Screen {
                 touch();
             }
             case "LEFT", "RIGHT", "A", "D" -> {
-                if (settingsCursor >= 1 && settingsCursor <= 9) {
+                if (settingsCursor >= 1 && settingsCursor <= 11) {
                     activateSettings(settingsCursor);
                 }
             }
@@ -817,15 +961,25 @@ public final class CardLoopScreen implements Screen {
                 return null;
             }
             case 9 -> {
-                Language.toggle();
+                UiTilt.toggleParallax();
                 touch();
                 return null;
             }
             case 10 -> {
+                UiTilt.toggleTilt();
+                touch();
+                return null;
+            }
+            case 11 -> {
+                Language.toggle();
+                touch();
+                return null;
+            }
+            case 12 -> {
                 settingsOpen = false;
                 return ScreenContext.go(ScreenContext.Target.START);
             }
-            case 11 -> {
+            case 13 -> {
                 settingsOpen = false;
                 return ScreenContext.quit();
             }
@@ -837,32 +991,34 @@ public final class CardLoopScreen implements Screen {
 
     /** 设置面板：居中面板（战斗/星图状态原样保留在底下）。 */
     private void drawSettingsOverlay(CanvasBuffer buffer, PixelArt art) {
-        // 【移植版诊断】去掉 0x99000000 全屏压暗：暗幕会把盘底座的边"藏"掉
-        // （开设置边缘变透明、关设置不透明的假象就来自它），需要时恢复本行：
-        // art.rect(0, 0, 640, 360, PixelArt.fromArgb(0x99000000));
+        // 暗幕保持关闭（诊断过：它会把盘底座的边藏掉）；改用不透明面板压住底图
         int w = 268;
         int h = 340;
         int x = (640 - w) / 2;
         int y = (360 - h) / 2;
-        art.rect(x, y, w, h, Palette.PANEL);
-        art.frame(x, y, w, h, Palette.CYAN);
-        art.hline(x + 2, x + w - 2, y + 26, Palette.PANEL_EDGE);
-        zh(buffer, Language.t("设置", "SETTINGS"), x + 14, y + 8, 14, Palette.CYAN);
+        UiChrome.panel(art, x, y, w, h);
+        UiChrome.plate(buffer, art, x + 10, y - 8, 56, 17, Language.t("设置", "SETUP"));
+        UiChrome.latin(art, "BATTLE CONFIG", x + w - 8 - UiChrome.measureLatin("BATTLE CONFIG"),
+                y + 5, Palette.STEEL_DIM);
+        UiChrome.divider(art, x + 8, y + 22, w - 16);
 
         String[] labels = settingLabels();
         for (int i = 0; i < SETTINGS_ITEMS; i++) {
-            int ry = y + 40 + i * 22;
+            int ry = y + 40 + i * 20;
             boolean sel = i == settingsCursor;
             if (sel) {
-                art.frame(x + 8, ry - 6, w - 16, 22, Palette.WARN);
-                art.line(x + 14, ry + 5, x + 17, ry + 2, Palette.WARN);
-                art.line(x + 17, ry + 2, x + 14, ry - 1, Palette.WARN);
+                UiChrome.banner(buffer, art, x + 8, ry - 6, w - 16, 20, labels[i]);
+            } else {
+                UiChrome.chamferFrame(art, x + 8, ry - 6, w - 16, 20, 2, Palette.STEEL_FAINT);
+                UiChrome.zh(buffer, labels[i], x + 26, ry - 1, 12, Palette.LINE_DIM);
             }
-            zh(buffer, labels[i], x + 26, ry - 1, 12, sel ? Palette.WARN : Palette.LINE);
+            UiChrome.sectionMark(art, x + 14, ry + 4, sel ? Palette.INK : Palette.STEEL_DIM);
+            UiChrome.latin(art, String.format("%02d", i + 1), x + w - 22, ry + 1,
+                    sel ? Palette.INK : Palette.LINE_FAINT);
         }
-        zh(buffer, Language.t("↑↓ 选择    ←→ 切换    Esc 关闭",
+        UiChrome.zh(buffer, Language.t("↑↓ 选择    ←→ 切换    Esc 关闭",
                 "UP/DOWN SELECT   LEFT/RIGHT CHANGE   ESC CLOSE"),
-                x + 14, y + h - 22, 10, Palette.LINE_FAINT);
+                x + 14, y + h - 22, 12, Palette.LINE_FAINT);
     }
 
     /** 动态文案：音乐/音效/扫描线显示开关，时机/风格化/滤镜/语言显示当前值。 */
@@ -889,6 +1045,12 @@ public final class CardLoopScreen implements Screen {
                 Language.t("背景滤镜：", "BACKDROP FILTER: ")
                         + Language.t(VideoSettings.backdropFilter().label(),
                         VideoSettings.backdropFilter().labelEn()),
+                Language.t("界面视差：", "PARALLAX: ")
+                        + Language.t(UiTilt.parallaxEnabled() ? "开" : "关",
+                        UiTilt.parallaxEnabled() ? "ON" : "OFF"),
+                Language.t("界面透视：", "UI PERSPECTIVE: ")
+                        + Language.t(UiTilt.tiltEnabled() ? "开" : "关",
+                        UiTilt.tiltEnabled() ? "ON" : "OFF"),
                 Language.t("语言：", "LANGUAGE: ") + Language.t("中文", "English"),
                 Language.t("返回标题", "BACK TO TITLE"),
                 Language.t("退出游戏", "QUIT GAME")
@@ -902,7 +1064,7 @@ public final class CardLoopScreen implements Screen {
         int x = (640 - w) / 2;
         int y = (360 - h) / 2;
         for (int i = 0; i < SETTINGS_ITEMS; i++) {
-            int ry = y + 40 + i * 22;
+            int ry = y + 40 + i * 20;
             int index = i;
             sink.add(x + 8, ry - 6, w - 16, 22, () -> {
                 settingsCursor = index;
@@ -931,6 +1093,8 @@ public final class CardLoopScreen implements Screen {
         // 顺序就是层级：HotspotSink 里后注册的压住先注册的。棋盘画在底下，覆盖层的行画在最上面，
         // 所以棋盘要先登记、行要最后登记——顺序反了就会「只有行尾能点到」（棋盘把行吞掉）。
         if (!overlay || placing || spacePort) {
+            // 棋盘那一层斜得比面板多：热区跟着棋盘平面反变换，指针才能正好落在格子上
+            sink.plane(UiTilt.BOARD);
             sink.draw(ourBoardX(), BOARD_Y, BOARD_SPAN, BOARD_SPAN,
                     (mx, my) -> hoverOurBoard(mx, my),
                     (mx, my) -> dragShipTo(mx, my),
@@ -946,6 +1110,8 @@ public final class CardLoopScreen implements Screen {
                     this::releaseDrag);
         }
         if (starMapVisible()) {
+            // 星图画在底板上（不倾斜），热区也按原始设计坐标算
+            sink.plane(UiTilt.NONE);
             // 整屏拖动平移：先登记，压在恒星热区下面——按在恒星上仍然是跃迁，不会被拖走。
             // 同时用它整屏跟踪指针：走过的恒星没有热区，也靠这里更新坐标才能悬浮出名字/类型。
             sink.draw(0, 0, 640, 360, this::noteMouse,
@@ -968,6 +1134,7 @@ public final class CardLoopScreen implements Screen {
                     touch();
                 });
             }
+            sink.plane(UiTilt.UI);
             return;
         }
         if (stage() == Run.Stage.LULL) {
@@ -1069,7 +1236,8 @@ public final class CardLoopScreen implements Screen {
                     this::noteMouse, this::departSpacePort, null, null);
         }
         if (battle) {
-            // 敌方棋盘：悬浮看船，点一艘换目标
+            // 敌方棋盘：悬浮看船，点一艘换目标（同样跟着棋盘平面走）
+            sink.plane(UiTilt.BOARD);
             sink.draw(ENEMY_BOARD_X, BOARD_Y, BOARD_SPAN, BOARD_SPAN,
                     (mx, my) -> {
                         noteMouse(mx, my);
@@ -1090,12 +1258,23 @@ public final class CardLoopScreen implements Screen {
                     () -> {
                     },
                     () -> hoveredFoe = -1);
-            sink.add(BTN_X, TURN_BTN_Y, BTN_W, BTN_H, this::endTurn);
-            sink.track(BTN_X, SKILL_BTN_Y, BTN_W, BTN_H,
+            // 新版版面：左上齿轮 = 设置，左下三角 = 跳过回合，立绘下大菱形 = 舰长技
+            sink.track(GEAR_X, GEAR_Y, GEAR_S, GEAR_S,
+                    (mx, my) -> hoveredGear = true,
+                    this::openSettings,
+                    () -> hoveredGear = true,
+                    () -> hoveredGear = false);
+            sink.track(SKIP_X, SKIP_Y, SKIP_W, SKIP_H,
+                    (mx, my) -> hoveredTurn = true,
+                    this::endTurn,
+                    () -> hoveredTurn = true,
+                    () -> hoveredTurn = false);
+            sink.track(SKILL_CX - SKILL_R, SKILL_CY - SKILL_R, SKILL_R * 2, SKILL_R * 2,
                     (mx, my) -> hoveredSkill = true,
                     this::useSkill,
                     () -> hoveredSkill = true,
                     () -> hoveredSkill = false);
+            sink.plane(UiTilt.UI);
         }
         if (stage() == Run.Stage.REWARD || placing) {
             int[] skip = skipRect();
@@ -1354,10 +1533,7 @@ public final class CardLoopScreen implements Screen {
     }
 
     private int[] cardRect(int index) {
-        int col = index % CARD_COLS;
-        int row = index / CARD_COLS;
-        return new int[]{CARD_X + col * (CARD_SIZE + CARD_GAP),
-                CARD_Y + row * (CARD_SIZE + CARD_GAP), CARD_SIZE, CARD_SIZE};
+        return cardBarRect(index);
     }
 
     private int[] skipRect() {
@@ -1420,7 +1596,10 @@ public final class CardLoopScreen implements Screen {
     public void draw(CanvasBuffer buffer) {
         drawGame(buffer);
         if (settingsOpen) {
+            // 设置面板是最高的一块浮板：整屏把它画进一层再斜着贴回去
+            buffer.beginLayer();
             drawSettingsOverlay(buffer, buffer.art());
+            buffer.endLayer(UiTilt.UI, 0, 0, 640, 360);
         }
     }
 
@@ -1443,61 +1622,144 @@ public final class CardLoopScreen implements Screen {
             return;
         }
         drawBackdrop(art, true);
-        drawTopBar(buffer, art);
         if (stage() == Run.Stage.EVENT) {
-            drawEventScreen(buffer, art);
+            // 事件屏自带标题，不再叠顶栏
+            buffer.beginLayer();
+            drawEventScreen(buffer, buffer.art());
+            buffer.endLayer(UiTilt.UI, 0, 0, 640, 300);
+            buffer.beginLayer();
             drawFooter(buffer);
+            buffer.endLayer(UiTilt.UI.withDepth(1), 0, 300, 640, 60);
+            buffer.beginLayer();
             drawToast(buffer);
+            buffer.endLayer(UiTilt.UI.withDepth(3), 0, 200, 640, 160);
             return;
         }
         if (stage() == Run.Stage.LULL) {
             // 和太空港同一套版面：左边棋盘照样拖船变阵，右栏（原来敌人的位置）换成休整面板
-            drawOurBoard(buffer, art);
-            drawAuraCoverage(art);
-            drawLullPanel(buffer, art);
+            buffer.beginLayer();
+            drawOurBoard(buffer, buffer.art());
+            drawAuraCoverage(buffer.art());
+            buffer.endLayer(UiTilt.BOARD, PORT_BOARD_X - 8, BOARD_Y, BOARD_SPAN + 16, BOARD_SPAN + 18);
+            drawOurShips(buffer, art);
+            buffer.beginLayer();
+            drawPortraitFrame(buffer, buffer.art());
+            PortraitLayer.draw(buffer.art());   // 立绘压在棋盘上、UI 下面
+            drawPortraitFrameEdge(buffer.art());
+            buffer.endLayer(UiTilt.UI, 0, 0, 130, 270);
+            buffer.beginLayer();
+            drawLullPanel(buffer, buffer.art());
+            buffer.endLayer(UiTilt.UI, 0, 0, 640, 360);
+            buffer.beginLayer();
             drawFooter(buffer);
+            buffer.endLayer(UiTilt.UI.withDepth(1), 0, 300, 640, 60);
+            buffer.beginLayer();
             drawToast(buffer);
+            buffer.endLayer(UiTilt.UI.withDepth(3), 0, 200, 640, 160);
             drawSidePanel(buffer, art);
             return;
         }
         if (stage() == Run.Stage.SPACE_PORT) {
-            drawOurBoard(buffer, art);
-            drawAuraCoverage(art);
-            drawSpacePortScreen(buffer, art);
+            buffer.beginLayer();
+            drawOurBoard(buffer, buffer.art());
+            drawAuraCoverage(buffer.art());
+            buffer.endLayer(UiTilt.BOARD, PORT_BOARD_X - 8, BOARD_Y, BOARD_SPAN + 16, BOARD_SPAN + 18);
+            drawOurShips(buffer, art);
+            buffer.beginLayer();
+            drawPortraitFrame(buffer, buffer.art());
+            PortraitLayer.draw(buffer.art());   // 立绘压在棋盘上、UI 下面
+            drawPortraitFrameEdge(buffer.art());
+            buffer.endLayer(UiTilt.UI, 0, 0, 130, 270);
+            buffer.beginLayer();
+            drawSpacePortScreen(buffer, buffer.art());
+            buffer.endLayer(UiTilt.UI, 0, 0, 640, 360);
+            buffer.beginLayer();
             drawFooter(buffer);
+            buffer.endLayer(UiTilt.UI.withDepth(1), 0, 300, 640, 60);
+            buffer.beginLayer();
             drawToast(buffer);
+            buffer.endLayer(UiTilt.UI.withDepth(3), 0, 200, 640, 160);
             drawSidePanel(buffer, art);   // 棋盘悬浮描述：太空港也能看船的数据
             return;
         }
-        drawOurBoard(buffer, art);
-        drawAuraCoverage(art);   // 战斗/编入：悬浮船的光环罩住谁，黄框画在棋盘上
-        drawEnemyBoard(buffer, art);
+        // 棋盘是整个画面最低、也是斜得最多的那个平面：一张浮在星幕里的战术台
+        buffer.beginLayer();
+        drawOurBoard(buffer, buffer.art());
+        drawAuraCoverage(buffer.art());   // 战斗/编入：悬浮船的光环罩住谁，黄框画在棋盘上
+        drawEnemyBoard(buffer, buffer.art());
+        buffer.endLayer(UiTilt.BOARD, OUR_BOARD_X - 8, BOARD_Y, 640 - OUR_BOARD_X + 8, BOARD_SPAN + 18);
+        drawOurShips(buffer, art);
+        drawFoeShips(buffer, art);
+        drawLockMarkers(art);   // 锁定框最后画：压在棋子之上，才不会被棋子的像素盖住
+        // 战斗不打顶栏：血量/敌方/航程下方信息栏已经全有了，顶栏纯重复
+        buffer.beginLayer();
+        drawPortraitFrame(buffer, buffer.art());
+        PortraitLayer.draw(buffer.art());   // 棋盘在最底下，立绘压在棋盘上、其余 UI 下面
+        drawPortraitFrameEdge(buffer.art());
+        buffer.endLayer(UiTilt.UI, 0, 0, 130, 270);
         boolean overlay = overlayStage();
-        // 覆盖层阶段（选舰队 / 战利品 / 编入 / 结束）不画日志与读数：
-        // 它们和战利品行挤在同一片右栏，字会叠字
-        if (!overlay) {
-            drawLog(buffer, art);
-            drawStatusLines(buffer, art);
+        // 底部这一整块（控制台 + 左栏 + 双按钮 + 信息栏 + 手牌/选项）是同一块"浮板"：
+        // 一起画进同一层再整块偏移，块内间距一点不变 —— 面板之间靠得近，浮起来也还是一块。
+        buffer.beginLayer();
+        if (stage() == Run.Stage.BATTLE) {
+            drawCommandConsole(buffer, buffer.art());
+            drawLeftPanel(buffer, buffer.art());
+            drawCaptainControls(buffer, buffer.art());
+            drawInfoBox(buffer, buffer.art());
         }
-        drawControlButtons(buffer, art);
         if (overlay) {
-            drawOverlay(buffer, art);
+            drawOverlay(buffer, buffer.art());
         } else {
-            drawHand(buffer, art);
+            drawHandBars(buffer, buffer.art());
         }
-        drawFooter(buffer);
+        buffer.endLayer(UiTilt.UI, 0, 0, 640, 360);
+        // 提示条再高一层（它是"弹出来的"，比固定面板更靠前）
+        buffer.beginLayer();
         drawToast(buffer);
-        // 描述弹窗永远最后画：footer/调试层/toast 都不许盖住它
+        buffer.endLayer(UiTilt.UI.withDepth(3), 0, 200, 640, 160);
+        // 描述弹窗永远最后画、且不跟着视差走：它要贴着光标，位移会让人觉得"框跟手不同步"
         if (!overlay) {
             drawSidePanel(buffer, art);
         }
     }
 
+    /**
+     * 本场战斗用哪个天体当底图。每换一关、或同一关进了新的节点（visitedCount 变了）
+     * 才随机一次，随机源跟着航程种子走，同一次航程可复现；背景工坊里手动指定的场景优先。
+     */
+    private int battleScene() {
+        int manual = com.hysx.salvosequence.live.LiveBackdrops.selected();
+        if (manual >= 0) {
+            return manual;
+        }
+        // 调试键（F2）钉死的机位优先于随机，方便逐个看效果
+        if (debugPresetIndex >= 0) {
+            com.hysx.salvosequence.live.CameraPresets.Preset p =
+                    com.hysx.salvosequence.live.CameraPresets.get(debugPresetIndex);
+            return p.scene;
+        }
+        if (liveSceneRng == null) {
+            liveSceneRng = new java.util.Random(run.seed() ^ 0x5EEDB00CL);
+        }
+        if (livePreset == null || run.node() != liveSceneNode || run.visitedCount() != liveSceneVisits) {
+            liveSceneNode = run.node();
+            liveSceneVisits = run.visitedCount();
+            // 机位表覆盖近地轨道、恒星附近、远望等 48 种取景；一场仗抽一条，
+            // 连星球类型一起绑定，重进同一节点不会换脸。
+            livePreset = com.hysx.salvosequence.live.CameraPresets.pick(liveSceneRng);
+            com.hysx.salvosequence.live.LiveBackdrops.applyPreset(livePreset);
+            // 转速/配色这类连续量每场再掷一次（同一随机源，进同一节点可复现）
+            com.hysx.salvosequence.live.LiveBackdrops.randomizeForBattle(
+                    livePreset.scene, liveSceneRng);
+            liveScene = livePreset.scene;
+        }
+        return liveScene;
+    }
+
     private void drawBackdrop(PixelArt art, boolean twinkles) {
         // 实时 3D 背景优先：星云/恒星这类会动的场景每帧渲染 320×180 再 2 倍贴回来；
         // 没选、GL 没就绪或出错时退回程序化主题背景
-        int live = com.hysx.salvosequence.live.LiveBackdrops.sceneForBattle(
-                run.node(), run.visitedCount());
+        int live = battleScene();
         int[] liveFrame = com.hysx.salvosequence.live.LiveBackdrops.frame(live, time);
         if (liveFrame != null) {
             // 压暗：3D 场景当底图时不能抢棋盘和文字的对比度。各场景亮度差别很大
@@ -1923,22 +2185,51 @@ public final class CardLoopScreen implements Screen {
      * 视觉上"旋度不够"；0.21（pitch≈12°，接近真实星系）绕满 2 圈多才到盘缘。 */
     private static final double ARM_WIND = 0.21;
 
+    /**
+     * 顶栏：<b>已停用</b>，保留代码不再调用。
+     *
+     * <p>战斗里血量/敌方/航程下方信息栏都有，太空港和休整又各有自己的标题条，
+     * 顶栏叠上去纯属重复还压字；能量挪进了指令台标题行（见 drawCommandConsole）。
+     * 留着这块只为以后真需要一条通栏时改起来快。</p>
+     */
+    @Deprecated
+    private void drawTopBarLayer(CanvasBuffer buffer) {
+        buffer.beginLayer();
+        drawTopBar(buffer, buffer.art());
+        buffer.endLayer(UiTilt.UI.withDepth(1), 0, 0, 640, 22);
+    }
+
     private void drawTopBar(CanvasBuffer buffer, PixelArt art) {
-        art.rect(BAR_X, BAR_Y, 632, BAR_H, Palette.PANEL);
-        art.frame(BAR_X, BAR_Y, 632, BAR_H, Palette.LINE_FAINT);
+        // 切角通栏：暗底 + 双层钢蓝框 + 左端琥珀刻线。星幕协议的所有栏位都是这个形状，
+        // 不再是"一条 1px 白线横在白字下面"。
+        UiChrome.chamferFill(art, BAR_X, BAR_Y, 632, BAR_H, 3, Palette.PANEL);
+        UiChrome.chamferFrame(art, BAR_X, BAR_Y, 632, BAR_H, 3, Palette.STEEL_DIM);
+        art.hline(BAR_X + 4, BAR_X + 627, BAR_Y + 1, Palette.STEEL_FAINT);
+        art.fillRect(BAR_X + 3, BAR_Y + BAR_H / 2 - 1, 2, 3, Palette.AMBER);
+        art.fillRect(BAR_X + 630, BAR_Y + BAR_H / 2 - 1, 2, 3, Palette.AMBER);
 
         // 通栏自上而下排：所有位置都按实测字宽往后推，写死坐标一换数字就压字
-        double x = BAR_X + 4;
+        double x = BAR_X + 9;
         String route = Language.t("航程 ", "ROUTE ") + (run.node() + 1) + "/" + run.routeLength();
-        zh(buffer, route, x, BAR_Y + 2, 12, Palette.CYAN_DIM);
+        zh(buffer, route, x, BAR_Y + 2, 12, Palette.STEEL);
         x += textWidth(route, 12) + 6;
         for (int i = 0; i < run.routeLength(); i++) {
             boolean done = i < run.node();
             boolean here = i == run.node();
-            art.rect((int) x + i * 9, BAR_Y + 6, 6, 5,
-                    done ? Palette.OK : here ? Palette.CYAN : Palette.PANEL_ALT);
+            int px = (int) x + i * 9;
+            // 航程刻度：走过的亮青绿、当前的实心琥珀（带一格高光）、未到的暗蓝
+            art.fillRect(px, BAR_Y + 6, 6, 5,
+                    done ? Palette.TEAL : here ? Palette.AMBER : Palette.STEEL_FAINT);
+            if (here) {
+                art.hline(px, px + 5, BAR_Y + 5, Palette.WARN);
+            }
+            if (!done && !here) {
+                art.hline(px, px + 5, BAR_Y + 10, Palette.PANEL_EDGE);
+            }
         }
-        x += run.routeLength() * 9 + 10;
+        x += run.routeLength() * 9 + 8;
+        UiChrome.vRule(art, (int) x, BAR_Y + 3, BAR_H - 6);
+        x += 6;
 
         // 我方结构值（全队合计）
         String ourLabel = Language.t("我方", "OURS");
@@ -1951,7 +2242,8 @@ public final class CardLoopScreen implements Screen {
         x += 88 + 4;
         String hpText = hasFleet ? run.hp() + "/" + run.maxHp() : "-/-";
         en(art, hpText, (int) x, BAR_Y + 5, Palette.LINE);
-        x += font.measure(hpText) + 12;
+        x += font.measure(hpText) + 8;
+        UiChrome.vRule(art, (int) x - 4, BAR_Y + 3, BAR_H - 6);
 
         // 敌方编队（只在战斗中显示——星图模式下"下一场"取决于跳哪颗星，没有预览）
         List<FoeView> foes = stage() == Run.Stage.BATTLE ? foeViews() : List.of();
@@ -1975,10 +2267,10 @@ public final class CardLoopScreen implements Screen {
         }
         if (stage() != Run.Stage.LULL) {
             String foeLabel = Language.t("敌方 ", "ENEMY ") + alive + "/" + foes.size();
-        zh(buffer, foeLabel, x, BAR_Y + 2, 12, Palette.FOE_GLOW);
-        x += textWidth(foeLabel, 12) + 4;
-        bar(art, (int) x, BAR_Y + 6, 70, 5, ratio(total, max), Palette.FOE_GLOW);
-        x += 70 + 4;
+            zh(buffer, foeLabel, x, BAR_Y + 2, 12, Palette.FOE_GLOW);
+            x += textWidth(foeLabel, 12) + 4;
+            bar(art, (int) x, BAR_Y + 6, 70, 5, ratio(total, max), Palette.CRIMSON);
+            x += 70 + 4;
             String foeText = total + "/" + max;
             en(art, foeText, (int) x, BAR_Y + 5, Palette.LINE_DIM);
         }
@@ -1992,12 +2284,21 @@ public final class CardLoopScreen implements Screen {
         int pips = Math.max(1, maxEnergy);
         int pipsX = 632 - (pips * 9 - 2);
         if (Language.isEnglish()) {
-            en(art, "EN", pipsX - 16, BAR_Y + 5, Palette.WARN);
+            en(art, "EN", pipsX - 16, BAR_Y + 5, Palette.TEAL);
         } else {
-            zh(buffer, "能量", pipsX - 28, BAR_Y + 2, 12, Palette.WARN);
+            zh(buffer, "能量", pipsX - 28, BAR_Y + 2, 12, Palette.TEAL);
         }
+        // 能量格：满格是青绿实心、空槽是暗蓝，格子上缘留一条高光当作"发光"
         for (int i = 0; i < pips; i++) {
-            art.rect(pipsX + i * 9, BAR_Y + 5, 7, 8, i < energy ? Palette.WARN : Palette.PANEL_ALT);
+            int px = pipsX + i * 9;
+            if (i < energy) {
+                art.fillRect(px, BAR_Y + 5, 7, 8, Palette.TEAL);
+                art.hline(px, px + 6, BAR_Y + 5, Palette.WARN);
+                art.hline(px, px + 6, BAR_Y + 12, Palette.TEAL_DIM);
+            } else {
+                art.fillRect(px, BAR_Y + 5, 7, 8, Palette.STEEL_FAINT);
+                art.hline(px, px + 6, BAR_Y + 12, Palette.PANEL_EDGE);
+            }
         }
     }
 
@@ -2017,39 +2318,9 @@ public final class CardLoopScreen implements Screen {
             zh(buffer, stage() == Run.Stage.PICK_LOADOUT ? "还没选舰队" : "舰队为空",
                     ourBoardX() + 8, BOARD_Y + 8, 12, Palette.LINE_FAINT);
         }
-        for (int i = 0; i < views.size(); i++) {
-            OurView view = views.get(i);
-            FleetUnit unit = view.unit();
-            int x = ourBoardX() + unit.x() * BOARD_CELL;
-            int y = BOARD_Y + unit.y() * BOARD_CELL;
-            drawShip(art, unit.ship(), x, y, unit.w(), unit.h(), view.alive(), false, time);
-            if (view.alive()) {
-                bar(art, x + 1, y + unit.h() * BOARD_CELL - 3, unit.w() * BOARD_CELL - 2, 2,
-                        ratio(view.hp(), view.maxHp()), hpColor(view.hp(), view.maxHp()));
-                if (view.block() > 0) {
-                    art.frame(x - 1, y - 1, unit.w() * BOARD_CELL + 1, unit.h() * BOARD_CELL + 1,
-                            Palette.BLUE_DIM);
-                }
-            }
-            if (hoveredOurShip == i) {
-                art.frame(x - 2, y - 2, unit.w() * BOARD_CELL + 3, unit.h() * BOARD_CELL + 3,
-                        Palette.CYAN);
-            }
-        }
 
-        // 敌方锁定：我方前排（x 最大）披红菱形 + 四角箭矢，被换船吃掉时重播
-        if (stage() == Run.Stage.BATTLE) {
-            Battle battle = run.battle();
-            var front = battle == null ? null : battle.fleetRoster().pick(false);
-            if (front != null && front.ship() != null) {
-                FleetUnit unit = front.ship();
-                drawLockMarker(art,
-                        ourBoardX() + unit.x() * BOARD_CELL,
-                        BOARD_Y + unit.y() * BOARD_CELL,
-                        unit.w(), unit.h(),
-                        foeLockStart, Palette.DANGER, Palette.LOCK_HOT, Palette.LOCK_DIM);
-            }
-        }
+        // 敌方锁定：我方前排（x 最大）披红菱形 + 四角箭矢。标记本身在棋子之后画
+        // （见 drawLockMarkers），否则会被棋子盖掉一半。
 
         // 编入新船：只把当前预览画实，其余候选点一个小角标（134 个都铺底会糊成一片）
         if (stage() == Run.Stage.SLOT) {
@@ -2082,8 +2353,7 @@ public final class CardLoopScreen implements Screen {
             }
         }
         if (!overlayStage()) {
-            zh(buffer, "我方舰队 16×16", ourBoardX() + 2, BOARD_Y + BOARD_SPAN + 3, 12,
-                    Palette.LINE_FAINT);
+
         }
     }
 
@@ -2091,11 +2361,130 @@ public final class CardLoopScreen implements Screen {
         drawBoardBase(buffer, art, ENEMY_BOARD_X, "敌方舰队", "ENEMY",
                 Palette.FOE_DEEP, Palette.FOE_GLOW);
         List<FoeView> foes = foeViews();
+        // 悬浮敌舰的光环提示：和我方棋盘同款——被这艘敌舰光环罩到的敌舰描黄框
+        drawFoeAuraCoverage(art, foes);
+        // 锁定框不在这里画：它要在棋子之后覆盖上去，见 drawLockMarkers
+        if (!overlayStage()) {
+
+        }
+    }
+
+    /**
+     * 两个棋盘上的锁定标记：敌方锁我方的红菱形、我方锁的敌方菱形。
+     *
+     * <p>必须在棋子<b>之后</b>画：棋子是 16px 一格的实心像素图，先画标记会被整个盖住，
+     * 只露出四个角的一点点箭矢。</p>
+     */
+    private void drawLockMarkers(PixelArt art) {
+        if (stage() != Run.Stage.BATTLE) {
+            return;
+        }
+        Battle battle = run.battle();
+        if (battle == null) {
+            return;
+        }
+        // 我方前排：敌方的下一次攻击落点，红菱形 + 箭矢（被换船吃掉时重播）
+        var front = battle.fleetRoster().pick(false);
+        if (front != null && front.ship() != null) {
+            FleetUnit unit = front.ship();
+            // 位置必须和棋子走同一套透视投影（shipLeft/shipTop），否则棋盘倾斜后
+            // 框会贴在格子左上角、跟棋子错开
+            double bx = ourBoardX() + unit.x() * BOARD_CELL;
+            double by = BOARD_Y + unit.y() * BOARD_CELL;
+            int x = shipLeft(bx, by, unit.w(), unit.h());
+            int y = shipTop(bx, by, unit.w(), unit.h());
+            var look = ShipPainter.lookOf(unit.ship());
+            drawLockMarker(art, x, y,
+                    shipSpanW(look, unit.w()), shipSpanH(look, unit.h()),
+                    foeLockStart, Palette.DANGER, Palette.LOCK_HOT, Palette.LOCK_DIM);
+        }
+        // 敌方：我方当前点名的那艘，打沉/换目标时重播一次
+        int ti = battle.targetIndex();
+        if (ti >= 0 && ti < battle.foes().size()) {
+            Battle.Foe foe = battle.foes().get(ti);
+            if (foe.alive()) {
+                FleetUnit unit = foe.unit();
+                double bx = ENEMY_BOARD_X + unit.x() * BOARD_CELL;
+                double by = BOARD_Y + unit.y() * BOARD_CELL;
+                int x = shipLeft(bx, by, unit.w(), unit.h());
+                int y = shipTop(bx, by, unit.w(), unit.h());
+                var look = ShipPainter.lookOfEnemy(unit.ship());
+                drawLockMarker(art, x, y,
+                        shipSpanW(look, unit.w()), shipSpanH(look, unit.h()));
+            }
+        }
+    }
+
+    /** 棋子实际画出来的像素宽（外观图格数 × 格宽），取不到时退回占格宽。 */
+    private static int shipSpanW(com.hysx.salvosequence.fleet.AppearanceDesign look, int wCells) {
+        int span = ShipPainter.drawnWidth(look, BOARD_CELL);
+        return span > 0 ? span : wCells * BOARD_CELL;
+    }
+
+    /** 同 {@link #shipSpanW}，纵向。 */
+    private static int shipSpanH(com.hysx.salvosequence.fleet.AppearanceDesign look, int hCells) {
+        int span = ShipPainter.drawnHeight(look, BOARD_CELL);
+        return span > 0 ? span : hCells * BOARD_CELL;
+    }
+
+    /**
+     * 棋子的屏幕位置：<b>位置</b>走棋盘的透视，<b>像素</b>不参与变形。
+     *
+     * <p>棋子是 16px 一格的像素图，跟着棋盘一起透视会被重采样，边缘和舷窗全糊，
+     * 后续还要在这上面叠血条、光环、选中框，缩放一下就全错位。所以棋盘的框、网格、铭牌
+     * 照常透视，棋子单独按透视算出的坐标正着画——位置贴合棋盘的透视，形不变。</p>
+     *
+     * <p>落点取<b>投影后格子的中心</b>：棋盘近端比远端大 2% 左右，棋子保持原尺寸时
+     * 这点误差摊在两边，比贴左上角、误差全堆在远侧要正。</p>
+     */
+    private static int shipLeft(double bx, double by, int wCells, int hCells) {
+        double left = UiTilt.BOARD.toX(bx, by);
+        double right = UiTilt.BOARD.toX(bx + wCells * BOARD_CELL, by + hCells * BOARD_CELL);
+        return (int) Math.round((left + right) / 2 - wCells * BOARD_CELL / 2.0);
+    }
+
+    private static int shipTop(double bx, double by, int wCells, int hCells) {
+        double top = UiTilt.BOARD.toY(bx, by);
+        double bottom = UiTilt.BOARD.toY(bx + wCells * BOARD_CELL, by + hCells * BOARD_CELL);
+        return (int) Math.round((top + bottom) / 2 - hCells * BOARD_CELL / 2.0);
+    }
+
+    /** 我方棋子（正着画）+ 血条 + 格挡框 + 悬浮框。 */
+    private void drawOurShips(CanvasBuffer buffer, PixelArt art) {
+        List<OurView> views = ourViews();
+        for (int i = 0; i < views.size(); i++) {
+            OurView view = views.get(i);
+            FleetUnit unit = view.unit();
+            double bx = ourBoardX() + unit.x() * BOARD_CELL;
+            double by = BOARD_Y + unit.y() * BOARD_CELL;
+            int x = shipLeft(bx, by, unit.w(), unit.h());
+            int y = shipTop(bx, by, unit.w(), unit.h());
+            drawShip(art, unit.ship(), x, y, unit.w(), unit.h(), view.alive(), false, time);
+            if (view.alive()) {
+                bar(art, x + 1, y + unit.h() * BOARD_CELL - 3, unit.w() * BOARD_CELL - 2, 2,
+                        ratio(view.hp(), view.maxHp()), hpColor(view.hp(), view.maxHp()));
+                if (view.block() > 0) {
+                    art.frame(x - 1, y - 1, unit.w() * BOARD_CELL + 1, unit.h() * BOARD_CELL + 1,
+                            Palette.BLUE_DIM);
+                }
+            }
+            if (hoveredOurShip == i) {
+                art.frame(x - 2, y - 2, unit.w() * BOARD_CELL + 3, unit.h() * BOARD_CELL + 3,
+                        Palette.CYAN);
+            }
+        }
+    }
+
+    /** 敌方棋子，同款处理。 */
+    private void drawFoeShips(CanvasBuffer buffer, PixelArt art) {
+        List<FoeView> foes = foeViews();
         for (int i = 0; i < foes.size(); i++) {
             FoeView foe = foes.get(i);
             FleetUnit unit = foe.unit();
-            int x = ENEMY_BOARD_X + unit.x() * BOARD_CELL;
-            int y = BOARD_Y + unit.y() * BOARD_CELL;
+            double bx = ENEMY_BOARD_X + unit.x() * BOARD_CELL;
+            double by = BOARD_Y + unit.y() * BOARD_CELL;
+            int x = shipLeft(bx, by, unit.w(), unit.h());
+            int y = shipTop(bx, by, unit.w(), unit.h());
             drawShip(art, foe.ship(), x, y, unit.w(), unit.h(), foe.alive(), true, time);
             if (foe.alive()) {
                 bar(art, x + 1, y + unit.h() * BOARD_CELL - 3, unit.w() * BOARD_CELL - 2, 2,
@@ -2110,41 +2499,49 @@ public final class CardLoopScreen implements Screen {
                         Palette.FOE_GLOW);
             }
         }
-        // 悬浮敌舰的光环提示：和我方棋盘同款——被这艘敌舰光环罩到的敌舰描黄框
-        drawFoeAuraCoverage(art, foes);
-        // 锁定框压在所有敌舰之上：菱形 + 四角箭矢，打沉/换目标时重播一次
-        if (stage() == Run.Stage.BATTLE) {
-            Battle battle = run.battle();
-            int ti = battle == null ? -1 : battle.targetIndex();
-            if (ti >= 0 && ti < foes.size() && foes.get(ti).alive()) {
-                FleetUnit unit = foes.get(ti).unit();
-                drawLockMarker(art,
-                        ENEMY_BOARD_X + unit.x() * BOARD_CELL,
-                        BOARD_Y + unit.y() * BOARD_CELL,
-                        unit.w(), unit.h());
-            }
-        }
-        if (!overlayStage()) {
-            zh(buffer, "敌方舰队 16×16", ENEMY_BOARD_X + 2, BOARD_Y + BOARD_SPAN + 3, 12,
-                    Palette.LINE_FAINT);
-        }
     }
 
     private void drawBoardBase(CanvasBuffer buffer, PixelArt art, int x0, String tagZh,
                                String tagEn, com.hysx.salvosequence.core.Color unusedDeep,
                                com.hysx.salvosequence.core.Color tagColor) {
-        // 半透明棋盘底：渐变星空透上来（fillRectArgb 支持 alpha 混合）
-        art.rect(x0, BOARD_Y, BOARD_SPAN, BOARD_SPAN, PixelArt.fromArgb(0x880A0E16));
-        art.frame(x0, BOARD_Y, BOARD_SPAN, BOARD_SPAN, PixelArt.fromArgb(0xAA44527A));
-        for (int cy = 0; cy < FleetBoard.SIZE; cy++) {
-            for (int cx = 0; cx < FleetBoard.SIZE; cx++) {
-                if (cx % 4 == 0 && cy % 4 == 0) {
-                    art.pixel(x0 + cx * BOARD_CELL, BOARD_Y + cy * BOARD_CELL,
-                            PixelArt.fromArgb(0x80546A80));
-                }
+        // 棋盘容器：切角钢框板 + 四角琥珀括号（星幕的"视窗"）；底色不透明，网点只是底噪。
+        // 用「凹陷」而不是「浮起」：棋盘是全场最低的一层，不能有投影，靠内外明暗读成嵌进台面。
+        UiChrome.panelInset(art, x0, BOARD_Y, BOARD_SPAN, BOARD_SPAN);
+        // 盘面是半透明玻璃：底下星云一透上来，交点暗点就不够读了，所以先压一层很淡的格线。
+        // 0.42 的暗色叠在星云上是「刻在玻璃上的格」，既压得住底噪，又不至于把云闷死。
+        com.hysx.salvosequence.core.Color cellLine = com.hysx.salvosequence.core.Color.rgb(6, 9, 14, 0.42);
+        for (int g = 1; g < BOARD_SPAN / BOARD_CELL; g++) {
+            art.vline(BOARD_Y + 1, BOARD_Y + BOARD_SPAN - 2, x0 + g * BOARD_CELL, cellLine);
+            art.hline(x0 + 1, x0 + BOARD_SPAN - 2, BOARD_Y + g * BOARD_CELL, cellLine);
+        }
+        // 格子交点上的暗点：空盘也有战术网格感；船画上去会把点盖住，不抢船
+        for (int gx = 1; gx < BOARD_SPAN / BOARD_CELL; gx++) {
+            for (int gy = 1; gy < BOARD_SPAN / BOARD_CELL; gy++) {
+                art.pixel(x0 + gx * BOARD_CELL, BOARD_Y + gy * BOARD_CELL,
+                        Palette.STEEL_FAINT);
             }
         }
-        boardTag(buffer, art, Language.t(tagZh, tagEn), x0 + 3, BOARD_Y + 3, tagColor);
+        // 四沿的量程刻度：每 4 格（64px）一道长刻度，空盘也读得出"这是一块有刻度的屏"
+        for (int g = 4; g < BOARD_SPAN / BOARD_CELL; g += 4) {
+            int gx = x0 + g * BOARD_CELL;
+            int gy = BOARD_Y + g * BOARD_CELL;
+            art.vline(BOARD_Y + 4, BOARD_Y + 6, gx, Palette.STEEL_DIM);
+            art.hline(x0 + 4, x0 + 6, gy, Palette.STEEL_DIM);
+            art.vline(BOARD_Y + BOARD_SPAN - 7, BOARD_Y + BOARD_SPAN - 5, gx, Palette.STEEL_DIM);
+            art.hline(x0 + BOARD_SPAN - 7, x0 + BOARD_SPAN - 5, gy, Palette.STEEL_DIM);
+        }
+        // 归属铭牌：挂在棋盘下沿外侧的一小块底板。以前 8px 小字直接压在星云上，
+        // 对比度不够，还紧贴指令台顶边、读起来像指令台自己的标签。
+        if (!tagEn.isEmpty()) {
+            int tw = UiChrome.measureLatin(tagEn) + 13;
+            int tx = x0 + 6;
+            // 压在棋盘下沿内侧 1px：读作"挂在视窗下沿的铭牌"，又不至于被下方指令台切掉半行字
+            int ty = BOARD_Y + BOARD_SPAN - 9;
+            art.fillRect(tx, ty, tw, 9, Palette.PANEL);
+            art.hline(tx, tx + tw - 1, ty, Palette.PANEL_EDGE);
+            art.fillRect(tx + 2, ty + 3, 2, 4, tagColor);
+            UiChrome.latin(art, tagEn, tx + 7, ty + 1, Palette.STEEL_DIM);
+        }
     }
 
     private void boardTag(CanvasBuffer buffer, PixelArt art, String text, int x, int y,
@@ -2174,22 +2571,25 @@ public final class CardLoopScreen implements Screen {
     /**
      * 目标锁定标记：四角箭矢射向菱形，命中后只剩红色菱形框（常驻，随呼吸微胀）。
      * 动画由 {@link #lockAnimStart} 驱动，{@link #syncLockAnimation()} 在目标变化时重置。
+     *
+     * <p>尺寸收的是<b>棋子实际画出来的像素宽高</b>（外观图的格数 × {@link #BOARD_CELL}），
+     * 不是占格数——船体常画得比占格宽，用占格居中会让菱形偏到船的一侧。</p>
      */
-    private void drawLockMarker(PixelArt art, int x, int y, int w, int h) {
-        drawLockMarker(art, x, y, w, h, lockAnimStart,
+    private void drawLockMarker(PixelArt art, int x, int y, int spanW, int spanH) {
+        drawLockMarker(art, x, y, spanW, spanH, lockAnimStart,
                 Palette.LOCK, Palette.LOCK_HOT, Palette.LOCK_DIM);
     }
 
     /**
      * 同一套锁定动画的通用版：敌方锁我方时换成警示红，动画起点单独计时。
      */
-    private void drawLockMarker(PixelArt art, int x, int y, int w, int h, double start,
+    private void drawLockMarker(PixelArt art, int x, int y, int spanW, int spanH, double start,
                                 com.hysx.salvosequence.core.Color edgeColor,
                                 com.hysx.salvosequence.core.Color hotColor,
                                 com.hysx.salvosequence.core.Color dimColor) {
-        int cx = x + w * BOARD_CELL / 2;
-        int cy = y + h * BOARD_CELL / 2;
-        int base = Math.max(w, h) * BOARD_CELL / 2 + 7;
+        int cx = x + spanW / 2;
+        int cy = y + spanH / 2;
+        int base = Math.max(spanW, spanH) / 2 + 7;
         double t = time - start;
         // 1) 四角箭矢：0–0.30s 飞到菱形边上，留 0.15s 做"命中"亮一档
         if (t >= 0 && t < 0.45) {
@@ -2266,31 +2666,44 @@ public final class CardLoopScreen implements Screen {
 
     private void drawSpacePortScreen(CanvasBuffer buffer, PixelArt art) {
         int px = PORT_PANEL_X;
-        int pw = PORT_BOARD_X - 4 - px;
-        art.rect(px, BOARD_Y, pw, BOARD_SPAN, Palette.PANEL);
-        art.frame(px, BOARD_Y, pw, BOARD_SPAN, Palette.LINE_DIM);
+        int pw = PORT_PANEL_W;
+        UiChrome.panel(art, px, BOARD_Y, pw, BOARD_SPAN);
         String capName = run.captain() != null ? run.captain().protagonist().nameZh() : "";
-        zh(buffer, "太空港", px + 6, BOARD_Y + 4, 12, Palette.CYAN);
-        zh(buffer, "合金 " + run.alloy() + "  舰长 " + capName, px + 90, BOARD_Y + 5, 12, Palette.WARN);
+        UiChrome.plate(buffer, art, px + 5, BOARD_Y - 7, 58, 17, Language.t("太空港", "PORT"));
+        UiChrome.latin(art, "DOCK 07", px + 70, BOARD_Y + 3, Palette.STEEL_DIM);
+        UiChrome.zh(buffer, Language.t("合金 ", "ALLOY ") + run.alloy(), px + 70,
+                BOARD_Y + 9, 12, Palette.WARN);
+        UiChrome.zhRight(buffer, capName, px + pw - 8, BOARD_Y + 9, 12, Palette.LINE_DIM);
         String[] tabs = {"编组", "定制", "融合", "培训", "星图"};
         int tabW = (pw - 16) / 5;
         for (int i = 0; i < 5; i++) {
             int tx = px + 6 + i * (tabW + 2);
             boolean on = spacePortTab == i;
-            art.rect(tx, BOARD_Y + 22, tabW - 2, 14, on ? Palette.PANEL_ALT : Palette.PANEL);
-            art.frame(tx, BOARD_Y + 22, tabW - 2, 14, on ? Palette.CYAN : Palette.LINE_FAINT);
-            zh(buffer, tabs[i], tx + 4, BOARD_Y + 24, 12, on ? Palette.CYAN : Palette.LINE_DIM);
+            if (on) {
+                UiChrome.banner(buffer, art, tx, BOARD_Y + 22, tabW - 2, 14, tabs[i]);
+            } else {
+                UiChrome.chamferFill(art, tx, BOARD_Y + 22, tabW - 2, 14, 2, Palette.PANEL_ALT);
+                UiChrome.chamferFrame(art, tx, BOARD_Y + 22, tabW - 2, 14, 2, Palette.STEEL_DIM);
+                zh(buffer, tabs[i], tx + (tabW - 2) / 2 - 9, BOARD_Y + 24, 12, Palette.LINE_DIM);
+            }
         }
         int contentY = BOARD_Y + 42;
         int contentH = BOARD_SPAN - 42 - 26;
-        art.rect(px + 4, contentY, pw - 12, contentH, Palette.PANEL_ALT);
+        UiChrome.chamferFill(art, px + 4, contentY, pw - 12, contentH, 3, Palette.PANEL_ALT);
+        art.hline(px + 6, px + pw - 9, contentY, Palette.STEEL_FAINT);
         // 出发键先画：它在下缘固定位置，而 tab 内的悬浮描述可能盖到这里，
         // 描述必须压在按钮上面（否则购买/强化提示会被绿条切掉）。
         int departY = BOARD_Y + BOARD_SPAN - 22;
         boolean canDepart = run.pendingBuyShip() == null;
-        art.rect(px + 6, departY, pw - 16, 16, canDepart ? Palette.OK : Palette.PANEL_EDGE);
-        zh(buffer, canDepart ? "出发 → 星图" : "先放好新船",
-                px + pw / 2 - 44, departY + 3, 12, canDepart ? Palette.BACKDROP : Palette.WARN);
+        if (canDepart) {
+            UiChrome.banner(buffer, art, px + 6, departY, pw - 18, 16,
+                    Language.t("出发 → 星图", "DEPART → MAP"));
+        } else {
+            UiChrome.chamferFill(art, px + 6, departY, pw - 18, 16, 3, Palette.PANEL_ALT);
+            UiChrome.chamferFrame(art, px + 6, departY, pw - 18, 16, 3, Palette.WARN);
+            UiChrome.zhCentered(buffer, Language.t("先放好新船", "PLACE THE NEW SHIP"),
+                    px + 6 + (pw - 18) / 2.0, departY + 2, 12, Palette.WARN);
+        }
         if (spacePortTab == 0) {
             drawSpArrangeTab(buffer, art, px, contentY, pw);
         } else if (spacePortTab == 1) {
@@ -2629,26 +3042,29 @@ public final class CardLoopScreen implements Screen {
     private void drawEventScreen(CanvasBuffer buffer, PixelArt art) {
         var card = run.eventCard();
         if (card == null) { return; }
-        art.fillRect(0, 0, 640, 360, PixelArt.fromArgb(0xB3000410));
-        art.rect(130, 60, 380, 260, Palette.PANEL);
-        art.frame(130, 60, 380, 260, Palette.CYAN_DIM);
-        zh(buffer, Language.t("遭遇", "ENCOUNTER"), 142, 68, 12, Palette.OK);
-        zh(buffer, card.title(), 142, 86, 14, Palette.CYAN);
+        UiChrome.scrim(art, 0, 0, 640, 360);
+        UiChrome.alertPanel(art, 130, 60, 380, 260);
+        UiChrome.windowTitle(buffer, art, 320, 68, Language.t("遭遇", "ENCOUNTER"),
+                "ANOMALOUS CONTACT", Palette.CRIMSON);
+        zh(buffer, card.title(), 146, 88, 14, Palette.AMBER);
+        UiChrome.divider(art, 146, 106, 348);
         int y = 114;
         for (String line : wrap(card.desc(), 20)) {
-            zh(buffer, line, 142, y, 12, Palette.LINE_DIM);
+            zh(buffer, line, 146, y, 12, Palette.LINE_DIM);
             y += 13;
         }
         int oy = 180;
         for (int i = 0; i < card.options().size(); i++) {
             var opt = card.options().get(i);
-            art.rect(140, oy, 360, 22, Palette.PANEL_ALT);
-            art.frame(140, oy, 360, 22, Palette.LINE_DIM);
-            zh(buffer, (i + 1) + ". " + opt.label(), 150, oy + 5, 12, Palette.LINE);
+            UiChrome.chamferFill(art, 140, oy, 360, 22, 3, Palette.PANEL_ALT);
+            UiChrome.chamferFrame(art, 140, oy, 360, 22, 3, Palette.STEEL_DIM);
+            UiChrome.chamferFill(art, 144, oy + 4, 14, 14, 2, Palette.AMBER);
+            UiChrome.latinCentered(art, Integer.toString(i + 1), 151, oy + 7, Palette.INK);
+            zh(buffer, opt.label(), 164, oy + 5, 12, Palette.LINE);
             oy += 26;
         }
-        zh(buffer, Language.t("数字键或点击选择", "NUMBER KEYS OR CLICK TO CHOOSE"),
-                142, 300, 12, Palette.LINE_FAINT);
+        UiChrome.zh(buffer, Language.t("数字键或点击选择", "NUMBER KEYS OR CLICK TO CHOOSE"),
+                146, 300, 12, Palette.LINE_FAINT);
     }
 
     /** 每个节点算出来的框色，定死后转星盘不再变（颜色本身已是两个角度的平均，与当前角度无关）。 */
@@ -2722,7 +3138,11 @@ public final class CardLoopScreen implements Screen {
      *  左右拖动旋转星盘，节点画在同一倾角的盘面上。 */
     private void drawFullScreenStarMap(CanvasBuffer buffer, PixelArt art) {
         drawStarDisk(art);
+        // 顶部投影器的光：扇面边缘取星盘左右两侧到灯口的角度，光强按球面距离衰减；
+        // 闪烁星点留到光之后再画，免得一颗亮星把某一束光顶得忽明忽暗。
+        drawProjectorLight(art);
         drawDiskTwinkles(art);
+        drawProjectorFixture(art);
         // 节点框的颜色是每颗星定死一次、与当前角度无关（见 nodeFrameColor），
         // 这里不用再按当前角度取一帧——那一下是白查，缓存没命中时还会同步解码卡一帧。
         var reachable = run.reachableStars();
@@ -2765,15 +3185,16 @@ public final class CardLoopScreen implements Screen {
                 if (r2.id() == st.id()) { canJump = true; break; }
             }
             var typeColor = starTypeColor(st.type());
-            Color nodeFrame = nodeFrameColor(st);
+            Color nodeFrame = nodeEdgeColor(st, typeColor);
             int sparkPhase = st.id() * 17;
             // 太阳常驻标记自带名字：悬浮不再叠任何字
             boolean isSun = "太阳".equals(st.nameZh());
             // 核心屏障内未解锁的节点：画灰色框 + "锁" 字，不走彩色分支
             boolean coreLocked = !run.gatePassed() && st.radius() < 30;
             if (coreLocked) {
+                // 锁定态不参与类型配色：灰星 + 黑白框，读作"还没解锁"
                 drawNodeSparkle(art, pos[0], pos[1], Palette.LINE_FAINT, 0, time, sparkPhase);
-                art.frame(pos[0] - 4, pos[1] - 4, 9, 9, nodeFrame);
+                art.frame(pos[0] - 4, pos[1] - 4, 9, 9, nodeFrameColor(st));
             } else if (isCurrent) {
                 int pulse = (int) (3 + 2 * Math.abs(Math.sin(time * 3)));
                 drawStarGlow(art, pos[0], pos[1], Palette.CYAN, Palette.LINE, pulse);
@@ -2782,17 +3203,17 @@ public final class CardLoopScreen implements Screen {
                     drawStarLabelHover(buffer, st.nameZh(), pos[0], pos[1], pos[1] + 8,
                             STAR_NAME_SIZE, Palette.CYAN);
                     drawStarLabelHover(buffer, starTypeLabel(st.type()), pos[0], pos[1],
-                            pos[1] - 7 - STAR_TYPE_SIZE, STAR_TYPE_SIZE, Palette.LINE_FAINT);
+                            pos[1] - 7 - STAR_TYPE_SIZE, STAR_TYPE_SIZE, typeColor);
                 }
             } else if (st.visited()) {
-                drawNodeSparkle(art, pos[0], pos[1], Palette.LINE_DIM, 0, time, sparkPhase);
+                drawNodeSparkle(art, pos[0], pos[1], shade(typeColor, 0.72), 0, time, sparkPhase);
                 art.rect(pos[0] - 1, pos[1] - 1, 2, 2, Palette.STAR_FAR);
                 if (!isSun) {
                     drawStarLabelHover(buffer, st.nameZh(), pos[0], pos[1], pos[1] + 8,
                             STAR_NAME_SIZE, Palette.LINE_DIM);
                     // 走过的节点也要能看类型：名字 + 上方关卡类型一起悬浮出现
                     drawStarLabelHover(buffer, starTypeLabel(st.type()), pos[0], pos[1],
-                            pos[1] - 7 - STAR_TYPE_SIZE, STAR_TYPE_SIZE, Palette.LINE_DIM);
+                            pos[1] - 7 - STAR_TYPE_SIZE, STAR_TYPE_SIZE, shade(typeColor, 0.8));
                 }
                 if (canJump) {
                     // 回头路：圈内已访问的星可折返（暗框提示）
@@ -2806,10 +3227,12 @@ public final class CardLoopScreen implements Screen {
                     drawStarLabelHover(buffer, st.nameZh(), pos[0], pos[1], pos[1] + 8,
                             STAR_NAME_SIZE, typeColor);
                     drawStarLabelHover(buffer, starTypeLabel(st.type()), pos[0], pos[1],
-                            pos[1] - 7 - STAR_TYPE_SIZE, STAR_TYPE_SIZE, Palette.LINE_FAINT);
+                            pos[1] - 7 - STAR_TYPE_SIZE, STAR_TYPE_SIZE, typeColor);
                 }
             } else {
-                drawNodeSparkle(art, pos[0], pos[1], Palette.LINE_FAINT, 0, time, sparkPhase);
+                // 远处的节点也保留类型色（压暗）：星图一眼能分出精英/事件/商店，
+                // 而不是一整片同色的星点
+                drawNodeSparkle(art, pos[0], pos[1], shade(typeColor, 0.55), 0, time, sparkPhase);
                 art.frame(pos[0] - 2, pos[1] - 2, 5, 5, nodeFrame);
                 if (st.type() == Run.NodeType.BOSS) {
                     art.frame(pos[0] - 4, pos[1] - 4, 9, 9, nodeFrame);
@@ -2843,21 +3266,32 @@ public final class CardLoopScreen implements Screen {
         if (sunVisible) {
             drawSunMarker(art, buffer, time, taken);
         }
-        zh(buffer, Language.t("星图  探索 " + run.visitedCount() + "/" + run.starMap().size()
-                        + "  合金 " + run.alloy(),
-                "STAR MAP  EXPLORED " + run.visitedCount() + "/" + run.starMap().size()
-                        + "  ALLOY " + run.alloy()), 8, 6, 12, Palette.CYAN);
-        zh(buffer, Language.t("拖动左右旋转星盘 "
+        // 星图也是"一个视窗"：顶部读数槽 + 四角括号 + 底部通栏控制台。
+        // 底色只压两档，星盘本身要透出来，所以用极暗的槽而不是厚面板。
+        UiChrome.chamferFill(art, 0, 0, 640, 21, 3, Palette.PANEL);
+        art.hline(0, 639, 21, Palette.STEEL_DIM);
+        art.hline(8, 631, 22, Palette.STEEL_FAINT);
+        UiChrome.plate(buffer, art, 6, 2, 44, 16, Language.t("星图", "MAP"));
+        UiChrome.zh(buffer, Language.t("探索 ", "EXPLORED ")
+                + run.visitedCount() + "/" + run.starMap().size(), 58, 4, 12, Palette.LINE_DIM);
+        UiChrome.vRule(art, 176, 4, 13);
+        UiChrome.zh(buffer, Language.t("合金 ", "ALLOY ") + run.alloy(), 186, 4, 12, Palette.WARN);
+        UiChrome.latin(art, "ASTROGRID", 640 - UiChrome.measureLatin("ASTROGRID") - 8, 6,
+                Palette.STEEL_DIM);
+        UiChrome.brackets(art, 0, 23, 640, 311, 3, Palette.STEEL_DIM, 9);
+
+        UiChrome.chamferFill(art, 0, 331, 640, 29, 3, Palette.PANEL);
+        art.hline(0, 639, 331, Palette.STEEL_DIM);
+        art.hline(64, 631, 332, Palette.STEEL_FAINT);
+        UiChrome.zh(buffer, Language.t("拖动左右旋转星盘 "
                         + String.format("%.1f", Math.toDegrees(starDiskRad())) + "°",
                         "DRAG TO SPIN "
                                 + String.format("%.1f", Math.toDegrees(starDiskRad())) + "°")
                 + (stage() == Run.Stage.MAP
-                        ? Language.t(" · 点击邻近恒星跃迁", " · CLICK A NEARBY STAR TO JUMP")
+                        ? Language.t(" · 点击邻近恒星跃迁", " · CLICK A NEARBY STAR")
                         : Language.t(" · M 返回", " · M BACK"))
-                + Language.t(" · F10 太阳 · ESC 设置", " · F10 SUN · ESC SETTINGS")
-                + Language.t(" · [ ] 消失点 " + (int) Math.rint(StarDisk.vanishY()),
-                        " · [ ] VP " + (int) Math.rint(StarDisk.vanishY())), 8, 344, 12,
-                Palette.LINE_DIM);
+                + Language.t(" · F10 太阳 · ESC 设置", " · F10 SUN · ESC SETTINGS"),
+                64, 341, 12, Palette.LINE_DIM);
     }
 
     /** 贴当前旋转角对应的星系盘帧：图像本身已经过拜耳处理，这里整幅直贴，不再二次抖动。 */
@@ -2923,6 +3357,154 @@ public final class CardLoopScreen implements Screen {
                 }
             }
         }
+    }
+
+    // ------------------------------------------------------------ 顶部投影器
+
+    /** 投影器灯口在屏幕上的位置：顶栏下方正中，灯体像从 HUD 底下伸出来。 */
+    private static final double PROJ_X = 320.0;
+    private static final double PROJ_Y = 38.0;
+    /** 球形衰减半径：灯口到星盘中心约 141px，取 260 让盘心仍亮、盘底自然收暗。 */
+    private static final double LIGHT_RADIUS = 260.0;
+    /** 扇面半角固定 56.5°（星盘转一圈实测的最宽边缘），不再逐帧量角度。 */
+    private static final double PROJ_HALF_ANGLE = Math.toRadians(56.5);
+    /** 扇面边缘的柔化宽度（弧度）：约 2.6°，够软但不会切出生硬的边。 */
+    private static final float FAN_SOFT = 0.045f;
+    /** 悬臂外渐隐：盘面亮度低于 COVER_LO 全黑，到 COVER_HI 完全受光。 */
+    private static final float COVER_LO = 0.010f;
+    private static final float COVER_HI = 0.070f;
+
+    /** 每个屏幕像素相对灯口的角度（atan2(dx, dy)，向下为 0）与球形衰减，建一次复用。 */
+    private float[] projAngle;
+    private float[] projSph;
+    /** 灯口附近的独立光晕，和球形衰减分开，避免整盘被灯口提亮。 */
+    private float[] projLamp;
+    /** 调试/探针用：本帧每像素的球面受光量。 */
+    private float[] lightBuf;
+
+    private void ensureProjectorFields() {
+        if (projAngle != null) {
+            return;
+        }
+        int w = StarDisk.IMAGE_W;
+        int h = StarDisk.IMAGE_H;
+        projAngle = new float[w * h];
+        projSph = new float[w * h];
+        projLamp = new float[w * h];
+        lightBuf = new float[w * h];
+        for (int y = 0; y < h; y++) {
+            double dy = y + 0.5 - PROJ_Y;
+            for (int x = 0; x < w; x++) {
+                int i = y * w + x;
+                double dx = x + 0.5 - PROJ_X;
+                double d2 = dx * dx + dy * dy;
+                projAngle[i] = (float) Math.atan2(dx, dy);
+                projSph[i] = (float) (1.0 / (1.0 + d2 / (LIGHT_RADIUS * LIGHT_RADIUS)));
+                // 灯口光晕只留灯口周围一圈，sigma≈26px；盘心处早已衰减到看不见
+                projLamp[i] = (float) (0.18 * Math.exp(-d2 / (2.0 * 26.0 * 26.0)));
+            }
+        }
+    }
+
+    /**
+     * 顶部投影器：球面衰减的照明，扇面固定在星盘最宽的 ±56.5°。
+     *
+     * <p>角度不再逐帧扫描，避免悬臂旋转时扇面忽宽忽窄。光强只按到灯口的球面距离
+     * 衰减（1/(1+d²/R²)）。盘面亮度低于悬臂外阈值的地方按原实现的思路渐隐到黑，
+     * 不用硬角度边把悬臂切掉；也没有体积积分、尘埃吸收、亮脊分析或丁达尔光柱。</p>
+     */
+    private void drawProjectorLight(PixelArt art) {
+        ensureProjectorFields();
+        int w = art.width();
+        int h = art.height();
+        int[] px = art.buffer();
+        float thL = (float) -PROJ_HALF_ANGLE;
+        float thR = (float) PROJ_HALF_ANGLE;
+        for (int y = 0; y < h; y++) {
+            double dy = y + 0.5 - PROJ_Y;
+            int row = y * w;
+            // 盘面下缘以下没有散射介质，空气光到这里收住，不会一路拖到屏幕底角
+            float hazeFade = 1f - smooth01((y - 300f) / 60f);
+            for (int x = 0; x < w; x++) {
+                int i = row + x;
+                // 灯口以上不投光：只保留灯体本身，背景压黑
+                if (dy <= 0.0) {
+                    lightBuf[i] = 0f;
+                    px[i] = 0xFF000000;
+                    continue;
+                }
+                float a = projAngle[i];
+                float sph = projSph[i];
+                // 扇面：thL..thR 内为 1，向外 FAN_SOFT 宽度内平滑到 0
+                float fanL = smooth01((a - thL + FAN_SOFT) / FAN_SOFT);
+                float fanR = smooth01((thR + FAN_SOFT - a) / FAN_SOFT);
+                float fan = fanL * fanR;
+                float illum = fan * sph;
+
+                int old = px[i];
+                // 超出悬臂的渐隐：亮的地方完全受光，盘外黑处渐隐到 0
+                float cover = smooth01((luma(old) - COVER_LO) / (COVER_HI - COVER_LO));
+                float lit = illum * cover;
+                lightBuf[i] = lit;
+
+                float r = ((old >> 16) & 0xFF) / 255f;
+                float g = ((old >> 8) & 0xFF) / 255f;
+                float b = (old & 0xFF) / 255f;
+                float lamp = projLamp[i];
+                // 扇面外仍保留一层压暗的盘面（参考旧实现只压盘外），扇面内再按球面衰减提亮
+                float base = cover * (0.30f + 0.70f * illum);
+                float haze = lit * hazeFade;
+                float nr = r * base + haze * 0.070f + lamp * 0.55f;
+                float ng = g * base + haze * 0.085f + lamp * 0.78f;
+                float nb = b * base + haze * 0.105f + lamp;
+                px[i] = 0xFF000000
+                        | (clamp8((int) (nr * 255f + 0.5f)) << 16)
+                        | (clamp8((int) (ng * 255f + 0.5f)) << 8)
+                        | clamp8((int) (nb * 255f + 0.5f));
+            }
+        }
+        art.flush(0, 0, w, h);
+    }
+
+    private static float smooth01(float v) {
+        if (v <= 0f) {
+            return 0f;
+        }
+        if (v >= 1f) {
+            return 1f;
+        }
+        return v * v * (3f - 2f * v);
+    }
+
+    private static float luma(int argb) {
+        float r = ((argb >> 16) & 0xFF) / 255f;
+        float g = ((argb >> 8) & 0xFF) / 255f;
+        float b = (argb & 0xFF) / 255f;
+        return 0.30f * r + 0.55f * g + 0.15f * b;
+    }
+
+    private static int clamp8(int v) {
+        return v < 0 ? 0 : Math.min(v, 255);
+    }
+
+    /** 投影器本体：从顶栏下伸出的悬臂 + 梯形灯体 + 发光灯口，画在光场之上。 */
+    private void drawProjectorFixture(PixelArt art) {
+        // 悬臂：从顶栏边缘垂下来
+        art.fillRect(314, 22, 12, 6, Palette.PANEL_ALT);
+        art.frame(314, 22, 12, 6, Palette.PANEL_EDGE);
+        // 灯体（梯形）
+        double[] xs = {296, 344, 334, 306};
+        double[] ys = {27, 27, 39, 39};
+        art.polygon(xs, ys, Palette.PANEL);
+        art.polygonOutline(xs, ys, Palette.PANEL_EDGE);
+        art.hline(300, 339, 28, Palette.STEEL_FAINT);
+        // 灯口：一条冷白缝，外面一圈钢色压边
+        art.fillRect(308, 36, 24, 3, Palette.STEEL_FAINT);
+        art.hline(310, 329, 37, Palette.BLUE);
+        art.hline(312, 327, 38, Palette.LINE);
+        // 两侧卡箍
+        art.vline(27, 34, 302, Palette.PANEL_EDGE);
+        art.vline(27, 34, 337, Palette.PANEL_EDGE);
     }
 
     /** 恒星屏幕坐标：极坐标按星盘旋转角转到盘面，再做 30° 俯角的透视投影。 */
@@ -3044,13 +3626,29 @@ public final class CardLoopScreen implements Screen {
 
     private com.hysx.salvosequence.core.Color starTypeColor(Run.NodeType t) {
         return switch (t) {
-            case ELITE -> Palette.WARN;
-            case EVENT -> Palette.OK;
+            case ELITE -> Palette.CRIMSON;
+            case EVENT -> Palette.TEAL;
             case REST -> Palette.BLUE;
-            case SHOP -> Palette.SHIP_GLOW;
+            case SHOP -> Palette.VIOLET;
             case BOSS -> Palette.DANGER;
-            default -> Palette.LINE;
+            default -> Palette.SHIP_HULL;
         };
+    }
+
+    /** 把颜色整体压暗到 k（0~1）：远处/走过的节点星保留色相，只降亮度。 */
+    private static com.hysx.salvosequence.core.Color shade(
+            com.hysx.salvosequence.core.Color c, double k) {
+        return com.hysx.salvosequence.core.Color.color(
+                c.getRed() * k, c.getGreen() * k, c.getBlue() * k);
+    }
+
+    /**
+     * 节点框的颜色：背景亮就用类型色的深版本（借黑框的反差），背景暗就用类型色本身。
+     * 这样方框也带类型信息，而不是每颗星都套一个同样的白/黑框。
+     */
+    private Color nodeEdgeColor(Run.StarNode st, Color typeColor) {
+        boolean brightBackground = Color.BLACK.equals(nodeFrameColor(st));
+        return brightBackground ? shade(typeColor, 0.45) : shade(typeColor, 0.92);
     }
 
     private String starTypeLabel(Run.NodeType t) {
@@ -3097,19 +3695,21 @@ public final class CardLoopScreen implements Screen {
         double spin = time * 1.1 + ph;
         int horiz = 3 + strength + (int) Math.round(pulse * (2 + strength));
         int vert = Math.min(horiz, 6);
+        // 芒尖用同色压暗，不再统一换成 LINE/白：一旦换成白，所有星都被拉成
+        // 同一种暖白，类型色只剩中间一两个像素，星图就会糊成"一片橙"。
         for (int i = 2; i <= horiz; i++) {
-            var c = i >= horiz - 1 ? Palette.LINE_FAINT : pulse > 0.72 ? Palette.LINE : color;
+            var c = i >= horiz - 1 ? shade(color, 0.55) : color;
             art.pixel(x + i, y, c);
             art.pixel(x - i, y, c);
         }
         for (int i = 2; i <= vert; i++) {
-            var c = i >= vert - 1 ? Palette.LINE_FAINT : pulse > 0.72 ? Palette.LINE : color;
+            var c = i >= vert - 1 ? shade(color, 0.55) : color;
             art.pixel(x, y + i, c);
             art.pixel(x, y - i, c);
         }
         int diag = Math.min(2 + (int) Math.round(pulse * 2 + strength), 6);
         for (int i = 2; i <= diag; i++) {
-            var c = i >= diag ? Palette.LINE_FAINT : color;
+            var c = i >= diag ? shade(color, 0.55) : color;
             art.pixel(x + i, y + i, c);
             art.pixel(x - i, y + i, c);
             art.pixel(x + i, y - i, c);
@@ -3214,6 +3814,787 @@ public final class CardLoopScreen implements Screen {
                 Palette.LINE_FAINT);
     }
 
+    // ------------------------------------------------------------ 新版战斗界面
+
+    /** 菱形（描边）。 */
+    private void diamond(PixelArt art, int cx, int cy, int r,
+                         com.hysx.salvosequence.core.Color color) {
+        art.line(cx, cy - r, cx + r, cy, color);
+        art.line(cx + r, cy, cx, cy + r, color);
+        art.line(cx, cy + r, cx - r, cy, color);
+        art.line(cx - r, cy, cx, cy - r, color);
+    }
+
+    /** 菱形（填充）。 */
+    private void fillDiamond(PixelArt art, int cx, int cy, int r,
+                             com.hysx.salvosequence.core.Color color) {
+        art.polygon(new double[]{cx, cx + r, cx, cx - r+1},
+                new double[]{cy - r+1, cy, cy + r, cy}, color);
+    }
+
+    /** 左上信息框：设置齿轮 + 航程 + 双方结构值。 */
+    private void drawLeftPanel(CanvasBuffer buffer, PixelArt art) {
+        // 底板由 drawPortraitFrame() 负责（那一块是立绘的框），这里只放压在框里的零件：
+        // 右上角齿轮、下面一条航程。
+        if (!drawAseTexture(art, "gear")) {
+            UiChrome.chamferFill(art, GEAR_X, GEAR_Y, GEAR_S, GEAR_S, 2, Palette.PANEL_ALT);
+            UiChrome.chamferFrame(art, GEAR_X, GEAR_Y, GEAR_S, GEAR_S, 2, Palette.STEEL_DIM);
+        }
+        if (hoveredGear) {
+            UiChrome.chamferFrame(art, GEAR_X, GEAR_Y, GEAR_S, GEAR_S, 2, Palette.AMBER);
+        }
+        int gx = GEAR_X + GEAR_S / 2;
+        int gy = GEAR_Y + GEAR_S / 2;
+        if (!drawAseTexture(art, "gear")) {
+            com.hysx.salvosequence.core.Color ink =
+                    hoveredGear ? Palette.AMBER : Palette.LINE_DIM;
+            // 齿轮：四根轴向齿 + 一圈 7×7 齿盘 + 3×3 轴孔，18px 里能读出"设置"
+            art.fillRect(gx - 1, gy - 6, 2, 3, ink);
+            art.fillRect(gx - 1, gy + 4, 2, 3, ink);
+            art.fillRect(gx - 6, gy - 1, 3, 2, ink);
+            art.fillRect(gx + 4, gy - 1, 3, 2, ink);
+            art.rect(gx - 3, gy - 3, 7, 7, ink);
+            art.fillRect(gx - 1, gy - 1, 3, 3, Palette.PANEL_ALT);
+        }
+
+        // 航程挪进右下读数据里了（那里横着排得下八颗菱形），左栏只留立绘框和这个齿轮。
+    }
+
+    private void hpBar(CanvasBuffer buffer, PixelArt art, int y, String label,
+                       int hp, int max, com.hysx.salvosequence.core.Color color) {
+        zh(buffer, label, 4, y, 12, Palette.LINE_DIM);
+        int barX = 30;
+        int barW = PANEL_W - barX - 26;
+        double ratio = Math.max(0, Math.min(1, hp / (double) max));
+        UiChrome.segBar(art, barX, y + 4, barW, 5, ratio, color);
+        en(art, hp + "/" + max, PANEL_W - 24, y + 2, Palette.LINE_DIM);
+    }
+
+    /**
+     * 底部指令台：一整块板托住左边的操作轨（舰长技 / 跳过 / 能量）和三列手牌。
+     *
+     * <p>装饰只放在边缘：竖隔断、三粒铆钉、标题和底缘散热缝。中间留给卡片，
+     * 不抢字。</p>
+     */
+    private void drawCommandConsole(CanvasBuffer buffer, PixelArt art) {
+        UiChrome.panel(art, CONSOLE_X, CONSOLE_Y, CONSOLE_W, CONSOLE_H);
+        // 指令台与右侧读数据之间那 2px 缝：不填深色，星云的红色会从缝里透出来像裂开
+        art.fillRect(CONSOLE_X + CONSOLE_W, CONSOLE_Y,
+                INFO_X - (CONSOLE_X + CONSOLE_W), CONSOLE_H, Palette.SPACE_DEEP);
+        // 操作轨 / 手牌区之间的竖隔断：一根钢蓝线 + 一条暗缝
+        art.vline(CONSOLE_Y + 5, CONSOLE_Y + CONSOLE_H - 6, RAIL_X, Palette.STEEL_FAINT);
+        art.vline(CONSOLE_Y + 5, CONSOLE_Y + CONSOLE_H - 6, RAIL_X + 1, Palette.SPACE_DEEP);
+        // 隔断上的三粒铆钉
+        for (int y = CONSOLE_Y + 12; y < CONSOLE_Y + CONSOLE_H - 10; y += 22) {
+            art.fillRect(RAIL_X - 3, y, 2, 2, Palette.PANEL_EDGE);
+        }
+        // 标题：琥珀小方块 + 「指令」+ 8px 拉丁副题
+        art.fillRect(47, CONSOLE_Y + 6, 3, 3, Palette.AMBER);
+        zh(buffer, "指令", 53, CONSOLE_Y + 2, 12, Palette.LINE);
+        UiChrome.latin(art, "COMMAND", 87, CONSOLE_Y + 6, Palette.STEEL_DIM);
+        // 手牌计数靠右，压着卡片右缘
+        UiChrome.zhRight(buffer, "手牌 " + hand().size() + "/" + CARD_MAX,
+                CONSOLE_X + CONSOLE_W - 8, CONSOLE_Y + 2, 12, Palette.LINE_DIM);
+        // 底缘散热缝：一排短横线，落在最后一行卡片下面的空带里
+        for (int x = CONSOLE_X + CONSOLE_W - 74; x < CONSOLE_X + CONSOLE_W - 10; x += 7) {
+            art.hline(x, x + 4, CONSOLE_Y + CONSOLE_H - 4, Palette.STEEL_FAINT);
+        }
+        // 结构细节：副题与手牌计数之间的空带塞一块警示斜纹、一组散热槽和出厂编号
+        UiChrome.hazard(art, CONSOLE_X + 150, CONSOLE_Y + 5, 20, 4);
+        UiChrome.vents(art, CONSOLE_X + 176, CONSOLE_Y + 4, 30, 2);
+        UiChrome.serial(art, "CN-02", CONSOLE_X + CONSOLE_W - 78, CONSOLE_Y + 6);
+    }
+
+    /** 舰长技（菱形按钮）/ 跳过回合（箭头板）/ 剩余能量。 */
+    private void drawCaptainControls(CanvasBuffer buffer, PixelArt art) {
+        Battle battle = run.battle();
+        if (battle == null) {
+            return;
+        }
+        boolean signature = battle.signature() != Captain.Signature.NONE;
+        boolean used = signature ? battle.signatureUsed() : battle.skillUsed();
+        boolean ready = signature
+                ? !used
+                : battle.energy() >= Battle.SKILL_COST && !used;
+        com.hysx.salvosequence.core.Color edge =
+                ready ? (hoveredSkill ? Palette.WARN : Palette.AMBER)
+                        : (hoveredSkill ? Palette.STEEL : Palette.PANEL_EDGE);
+        com.hysx.salvosequence.core.Color icon =
+                ready ? (hoveredSkill ? Palette.WARN : Palette.AMBER) : Palette.LINE_FAINT;
+
+        int cx = SKILL_CX;
+        int cy = SKILL_CY;
+        int r = SKILL_R;
+        // 1) 投影：右下错 1px，菱形像从板面上浮起来
+        fillDiamond(art, cx + 1, cy + 2, r, Palette.SPACE_DEEP);
+        // 2) 外圈斜面：左上受光、右下背光（琥珀=可用，钢蓝=不可用）
+        fillDiamond(art, cx, cy, r, ready ? Palette.AMBER_DEEP : Palette.STEEL_FAINT);
+        art.line(cx - r, cy, cx, cy - r, edge);
+        art.line(cx, cy - r, cx + r, cy,
+                ready ? Palette.AMBER_DIM : Palette.STEEL_DIM);
+        art.line(cx + r, cy, cx, cy + r, Palette.SPACE_DEEP);
+        art.line(cx, cy + r, cx - r, cy, Palette.STEEL_DIM);
+        // 3) 内面：再收一圈细线，按钮才有厚度
+        fillDiamond(art, cx, cy, r - 4, ready ? Palette.PANEL_ALT : Palette.PANEL);
+        diamond(art, cx, cy, r - 4, ready ? Palette.AMBER_DIM : Palette.PANEL_EDGE);
+        // 4) 中心徽记：八芒罗盘星——四根锥形长芒 + 四粒斜向短芒。
+        //    粗十字在 34px 的按钮里会读成"加号"，锥形星芒才像舰长的徽记。
+        int[][] dirs = {{0, -1}, {1, 0}, {0, 1}, {-1, 0}};
+        for (int[] d : dirs) {
+            double[] xs = {cx + d[0] * 10,
+                    cx + d[0] * 3 - d[1] * 3,
+                    cx + d[0] * 4,
+                    cx + d[0] * 3 + d[1] * 3};
+            double[] ys = {cy + d[1] * 10,
+                    cy + d[1] * 3 + d[0] * 3,
+                    cy + d[1] * 4,
+                    cy + d[1] * 3 - d[0] * 3};
+            art.polygon(xs, ys, icon);
+        }
+        fillDiamond(art, cx, cy, 2, icon);
+        art.fillRect(cx - 6, cy - 6, 2, 2, icon);
+        art.fillRect(cx + 5, cy - 6, 2, 2, icon);
+        art.fillRect(cx - 6, cy + 5, 2, 2, icon);
+        art.fillRect(cx + 5, cy + 5, 2, 2, icon);
+        if (used) {
+            // 已用掉：斜着划一道，和"能量不够"的暗态区分开
+            art.line(cx - 8, cy + 8, cx + 8, cy - 8, Palette.LINE_FAINT);
+        }
+        // 5) 外圈细描边：悬停时整颗亮起来
+        diamond(art, cx, cy, r + 2, hoveredSkill ? Palette.WARN : Palette.PANEL_EDGE);
+        // 6) 悬停说明：图标按钮不写字，技能名放到上方的临时小牌上
+        if (hoveredSkill) {
+            String label = signature ? "舰长技·" + battle.signature().nameZh()
+                    : Language.t("舰长技", "SKILL");
+            // textWidth 按 12px 估宽，实际字面比 advance 宽 1px 左右，留 9px 内边距才不会吃字
+            int tw = (int) Math.round(textWidth(label, 12)) + 18;
+            int tx = Math.max(2, cx - tw / 2);
+            int ty = cy - r - 21;
+            art.fillRect(tx, ty, tw, 17, Palette.PANEL);
+            art.frame(tx, ty, tw, 17, Palette.AMBER_DIM);
+            zh(buffer, label, tx + 9, ty + 2, 12, Palette.LINE);
+        }
+
+        // 跳过回合：与舰长技同一套菱形「模拟按钮」——投影 + 四边斜面 + 内嵌面 + 悬停外圈。
+        // 原来右端收成尖角的三角板，38px 宽里既塞不下"跳过"两个字，也不像按钮；
+        // 菱形里放不下 12px 的两个字，所以只留双人字图标，名字交给悬停小牌。
+        int scx = SKIP_X + SKIP_W / 2;
+        int scy = SKIP_Y + SKIP_H / 2;
+        int sr = SKIP_R;
+        fillDiamond(art, scx + 1, scy + 2, sr, Palette.SPACE_DEEP);
+        fillDiamond(art, scx, scy, sr, Palette.STEEL_FAINT);
+        com.hysx.salvosequence.core.Color skipEdge =
+                hoveredTurn ? Palette.OK : Palette.STEEL;
+        art.line(scx - sr, scy, scx, scy - sr, skipEdge);
+        art.line(scx, scy - sr, scx + sr, scy, Palette.STEEL_DIM);
+        art.line(scx + sr, scy, scx, scy + sr, Palette.SPACE_DEEP);
+        art.line(scx, scy + sr, scx - sr, scy, Palette.STEEL_DIM);
+        fillDiamond(art, scx, scy, sr - 4, Palette.PANEL);
+        diamond(art, scx, scy, sr - 4, hoveredTurn ? Palette.OK : Palette.PANEL_EDGE);
+        com.hysx.salvosequence.core.Color skipInk =
+                hoveredTurn ? Palette.OK : Palette.LINE_DIM;
+        // 跳过图标：实心双人字（两枚右向三角叠在一起），比原来的细线人字更有分量。
+        // 收在内嵌菱形面里（顶点 |dx|+|dy| ≤ 9），整体右移 2px，别压到斜面；
+        // 左三角比右三角矮一档、并且让右三角压住它的尖，读起来才不是一大一小两块。
+        art.polygon(new double[]{scx - 3, scx - 3, scx + 2},
+                new double[]{scy - 4, scy + 6, scy}, skipInk);
+        art.polygon(new double[]{scx + 1, scx + 1, scx + 6},
+                new double[]{scy - 4, scy + 6, scy}, skipInk);
+        diamond(art, scx, scy, sr + 2, hoveredTurn ? Palette.WARN : Palette.PANEL_EDGE);
+        if (hoveredTurn) {
+            String label = Language.t("跳过回合", "END TURN");
+            int tw = (int) Math.round(textWidth(label, 12)) + 18;
+            int tx = Math.max(2, scx - tw / 2);
+            int ty = 246;
+            art.fillRect(tx, ty, tw, 17, Palette.PANEL);
+            art.frame(tx, ty, tw, 17, Palette.STEEL_DIM);
+            zh(buffer, label, tx + 9, ty + 2, 12, Palette.LINE);
+        }
+
+        // 剩余能量：操作轨中间一排小菱形，整排以操作轨中线对齐（数量变了也居中）
+        int energy = battle.energy();
+        int maxEnergy = Math.max(1, battle.maxEnergy());
+        int pips = Math.min(maxEnergy, 5);
+        int startX = ENERGY_CX - (pips - 1) * 3;
+        for (int i = 0; i < pips; i++) {
+            int px = startX + i * 6;
+            if (i < energy) {
+                fillDiamond(art, px, ENERGY_Y, 3, Palette.WARN);
+            } else {
+                diamond(art, px, ENERGY_Y, 3, Palette.PANEL_EDGE);
+            }
+        }
+    }
+
+    /** 右下信息框：回合/格挡/装填 + 战报 + 选中与击毁。 */
+    /** 信息框左上角斜切后，第 y 行文字要缩进多少（贴着斜边排）。 */
+    private int indentAt(double y) {
+        double dy = y - INFO_Y;
+        return (int) Math.round(INFO_H - dy) + 4;
+    }
+
+    /**
+     * 有 Aseprite 贴图就贴上去（按切片位置），并返回 true；没有返回 false 让调用方画代码图形。
+     *
+     * <p>贴图来自 {@code -Dsalvo.ase=<json>} 那份导出，图层名 {@code img.<id>}、切片名 {@code <id>}。</p>
+     */
+    private boolean drawAseTexture(PixelArt art, String id) {
+        com.hysx.salvosequence.core.AseUi ui = com.hysx.salvosequence.core.AseUi.active();
+        if (ui == null || ui.texture(id) == null) {
+            return false;
+        }
+        ui.drawTexture(art, id);
+        return true;
+    }
+
+    private void drawInfoBox(CanvasBuffer buffer, PixelArt art) {
+        // 战斗读数视窗：不带铭牌（左上那块地留给立绘），内容自上而下——
+        // 两条横放的结构条 / 一行属性 / 一条分割线 / 战报 / 航程刻度。
+        if (!drawAseTexture(art, "info.box")) {
+            UiChrome.panel(art, INFO_X, INFO_Y, INFO_W, INFO_H);
+        }
+        // 结构细节：右缘一条竖向量程，读数区因此读成一台仪器而不是一块黑板
+        UiChrome.gaugeV(art, INFO_X + INFO_W - 6, INFO_Y + 10, INFO_H - 24, 6, 18,
+                Palette.STEEL_FAINT);
+        Battle battle = run.battle();
+        if (battle == null) {
+            return;
+        }
+        int col = INFO_X + 10;
+        int right = INFO_X + INFO_W - 10;
+        int half = (right - col - 12) / 2;
+        // 上半：我方在左、敌方在右，各占一半；数值右对齐到各自半区
+        UiChrome.latin(art, "OURS", col, INFO_Y + 4, Palette.TEAL);
+        String ours = run.hp() + "/" + run.maxHp();
+        en(art, ours, col + half - (int) font.measure(ours), INFO_Y + 4, Palette.LINE);
+        UiChrome.segBar(art, col, INFO_Y + 14, half, 4,
+                ratio(run.hp(), run.maxHp()), hpColor(run.hp(), run.maxHp()));
+
+        List<FoeView> foes = foeViews();
+        int alive = 0;
+        int hpSum = 0;
+        int maxSum = 0;
+        for (FoeView foe : foes) {
+            if (foe.alive()) {
+                alive++;
+                hpSum += foe.hp();
+                maxSum += foe.maxHp();
+            }
+        }
+        int fx = col + half + 12;
+        UiChrome.latin(art, "FOE", fx, INFO_Y + 4, Palette.CRIMSON);
+        String foesText = alive + "/" + foes.size() + " " + hpSum + "/" + Math.max(1, maxSum);
+        en(art, foesText, right - (int) font.measure(foesText), INFO_Y + 4, Palette.LINE_DIM);
+        UiChrome.segBar(art, fx, INFO_Y + 14, right - fx, 4,
+                maxSum <= 0 ? 0 : ratio(hpSum, maxSum), Palette.CRIMSON);
+
+        // 属性一行：四列等距，数字跟着中文一起排
+        int ay = INFO_Y + 21;
+        zh(buffer, Language.t("回合 " + battle.turn(), "TURN " + battle.turn()),
+                col, ay, 12, Palette.LINE);
+        zh(buffer, Language.t("格挡 " + battle.block(), "BLK " + battle.block()),
+                col + 56, ay, 12, Palette.CYAN_DIM);
+        zh(buffer, Language.t("牌库 " + battle.drawPile().size(),
+                        "DRAW " + battle.drawPile().size()),
+                col + 112, ay, 12, Palette.LINE_DIM);
+        zh(buffer, Language.t("弃牌 " + battle.discard().size(),
+                        "DISC " + battle.discard().size()),
+                col + 168, ay, 12, Palette.LINE_FAINT);
+
+        // 分割线：把读数区和战报分开
+        UiChrome.divider(art, col, INFO_Y + 36, INFO_W - 20);
+
+        List<String> lines = battle.recentLog(2);
+        for (int i = 0; i < lines.size(); i++) {
+            double ly = INFO_Y + 40 + i * 14;
+            zh(buffer, fit(lines.get(i), 12, INFO_W - 20), col, ly, 12,
+                    i == lines.size() - 1 ? Palette.LINE : Palette.LINE_DIM);
+        }
+
+        // 航程刻度：菱形串 + 右下角节点读数
+        int ry = INFO_Y + 80;
+        zh(buffer, "航程", col, ry - 6, 12, Palette.LINE_FAINT);
+        int rx = col + 34;
+        int total = run.routeLength();
+        if (total > 1) {
+            art.hline(rx, rx + Math.min(total, 8) * 11 - 7, ry, Palette.STEEL_FAINT);
+        }
+        for (int i = 0; i < total && i < 8; i++) {
+            int cx = rx + i * 11;
+            if (i < run.node()) {
+                fillDiamond(art, cx, ry, 3, Palette.TEAL);
+            } else if (i == run.node()) {
+                fillDiamond(art, cx, ry, 3, Palette.PANEL_ALT);
+                diamond(art, cx, ry, 4, Palette.AMBER);
+                UiChrome.tick(art, cx, ry, Palette.WARN);
+            } else {
+                diamond(art, cx, ry, 4, Palette.STEEL_DIM);
+            }
+        }
+        String nodeText = (run.node() + 1) + "/" + Math.max(1, total);
+        en(art, nodeText, right - (int) font.measure(nodeText), ry - 4, Palette.STEEL);
+    }
+
+    /**
+     * 战斗仪表盘：左栏 92~258 这一大片原本是空的（状态栏/舰长技按钮那套早就是死代码），
+     * 战斗时又故意不画顶栏，于是"我方还剩多少结构值"在盘面上根本读不到。
+     * 这里把它补成一块读数视窗：双方结构值 + 六个回合读数，位置就在立绘上方。
+     */
+    /**
+     * 战斗读数：只留最左上角的两条结构条。
+     *
+     * <p>原来这里是一整块「战况」仪表盘（回合/格挡/瞄准/装填/牌库/弃牌六行）——那块地是留给
+     * F12 立绘的（见 {@link #drawPortraitFrame}），读数回到底盘自带的信息框里。结构值必须
+     * 一直看得见，所以缩成两条窄条钉在左上角。</p>
+     */
+    private void drawVitals(CanvasBuffer buffer, PixelArt art) {
+        Battle battle = run.battle();
+        if (battle == null) {
+            return;
+        }
+        final int bx = 8;
+        final int bw = 108;
+
+        UiChrome.latin(art, "OURS", bx, VITALS_Y, Palette.TEAL);
+        String ours = run.hp() + "/" + run.maxHp();
+        en(art, ours, bx + bw - (int) font.measure(ours), VITALS_Y, Palette.LINE);
+        UiChrome.segBar(art, bx, VITALS_Y + 12, bw, 5,
+                ratio(run.hp(), run.maxHp()), hpColor(run.hp(), run.maxHp()));
+
+        List<FoeView> foes = foeViews();
+        int alive = 0;
+        int hpSum = 0;
+        int maxSum = 0;
+        for (FoeView foe : foes) {
+            if (foe.alive()) {
+                alive++;
+                hpSum += foe.hp();
+                maxSum += foe.maxHp();
+            }
+        }
+        UiChrome.latin(art, "FOE " + alive + "/" + foes.size(), bx, VITALS_Y + 18, Palette.CRIMSON);
+        String foesText = hpSum + "/" + Math.max(1, maxSum);
+        en(art, foesText, bx + bw - (int) font.measure(foesText), VITALS_Y + 18, Palette.LINE_DIM);
+        UiChrome.segBar(art, bx, VITALS_Y + 30, bw, 5,
+                maxSum <= 0 ? 0 : ratio(hpSum, maxSum), Palette.CRIMSON);
+    }
+
+    /**
+     * 左栏立绘框：F12 立绘站在这块板子里。
+     *
+     * <p>板子在立绘之前画（{@code PortraitLayer.draw} 压在上面），所以立绘不会被框盖住；
+     * 框沿用同一套语汇：切角底板 + 羊皮纸铭牌 + 四角括号 + 一道分隔线。</p>
+     */
+    private void drawPortraitFrame(CanvasBuffer buffer, PixelArt art) {
+        // 空白处铺一层和棋子盘同款的方格网：口径一致（16px 一格 + 交点暗点），
+        // 空窗口读成一块待机的战术屏，而不是一块没画完的透明洞。
+        drawPortraitGrid(art);
+        UiChrome.chamferFrame(art, 0, 0, 120, 268, UiChrome.CUT, Palette.STEEL_DIM);
+        UiChrome.chamferFrame(art, 2, 2, 116, 264,
+                Math.max(1, UiChrome.CUT - 2), Palette.STEEL_FAINT);
+        UiChrome.brackets(art, 0, 0, 120, 268, 2, Palette.AMBER, 5);
+        // 左上身份条：右上角是齿轮，左侧留一个 CAPT 短板，空窗口也不像没画完
+        art.fillRect(8, 7, 2, 6, Palette.AMBER_DIM);
+        UiChrome.latin(art, "CAPT", 12, 7, Palette.STEEL_DIM);
+        // 仪表细节：左缘量程、底部散热槽、出厂编号——立绘没开时窗口也是台舰长终端
+        UiChrome.gaugeV(art, 6, 24, 210, 8, 32, Palette.STEEL_FAINT);
+        UiChrome.vents(art, 14, 236, 46, 3);
+        art.fillRect(66, 236, 2, 9, Palette.STEEL_FAINT);
+        UiChrome.serial(art, "TERM-04", 110, 252);
+        // 立绘未开启时的待机画面：中心准星 + STANDBY，空窗口读成一台待机的舰长终端
+        int cx = 60;
+        int cy = 122;
+        art.hline(cx - 11, cx - 5, cy, Palette.STEEL_FAINT);
+        art.hline(cx + 5, cx + 11, cy, Palette.STEEL_FAINT);
+        art.vline(cy - 11, cy - 5, cx, Palette.STEEL_FAINT);
+        art.vline(cy + 5, cy + 11, cx, Palette.STEEL_FAINT);
+        art.pixel(cx, cy, Palette.AMBER_DIM);
+        art.pixel(cx - 1, cy, Palette.STEEL_DIM);
+        art.pixel(cx + 1, cy, Palette.STEEL_DIM);
+        art.pixel(cx, cy - 1, Palette.STEEL_DIM);
+        art.pixel(cx, cy + 1, Palette.STEEL_DIM);
+        UiChrome.latinCentered(art, "STANDBY", cx, cy + 18, Palette.AMBER);
+    }
+
+    /**
+     * 立绘窗的空白方格网：和棋盘同一套口径——{@link #BOARD_CELL} 一格、格线是压在背景上的
+     * 半透明暗线、交点上一点钢灰。
+     *
+     * <p>棋盘那块玻璃底噪很强，所以格线用 0.42 的暗色压住星云；立绘窗背后是同一片星幕，
+     * 直接沿用这个值，两块屏的网格才对得上、读成同一套仪器。</p>
+     *
+     * <p>画在框线之前，四角切角处整块跳过，不往切掉的那块三角里伸。</p>
+     */
+    private void drawPortraitGrid(PixelArt art) {
+        int w = 120;
+        int h = 268;
+        int cut = UiChrome.CUT;
+        // 棋盘那块玻璃的底色：半透明深压一层，星幕还透得出来，但格线和斜纹才有东西可压。
+        // 立绘窗和棋盘同一块"屏"，所以直接用同一个 BOARD_FILL，不另调一个近似值。
+        UiChrome.chamferFill(art, 0, 0, w, h, cut, UiChrome.BOARD_FILL);
+        // 棋盘那块是亮玻璃，格线用暗色"刻"进去；立绘窗背后是深空，暗线读不出来，
+        // 所以这里反过来——用很淡的钢色提亮，两头（深空/亮行星）都能看见。
+        com.hysx.salvosequence.core.Color cellLine =
+                com.hysx.salvosequence.core.Color.rgb(126, 158, 182, 0.20);
+        for (int gx = BOARD_CELL; gx < w; gx += BOARD_CELL) {
+            for (int y = 1; y < h - 1; y++) {
+                if (inCutCorner(gx, y, w, h, cut)) {
+                    continue;
+                }
+                art.pixel(gx, y, cellLine);
+            }
+        }
+        for (int gy = BOARD_CELL; gy < h; gy += BOARD_CELL) {
+            for (int x = 1; x < w - 1; x++) {
+                if (inCutCorner(x, gy, w, h, cut)) {
+                    continue;
+                }
+                art.pixel(x, gy, cellLine);
+            }
+        }
+        // 交点暗点：空窗口也有战术网格感，画面里不抢 STANDBY 和准星
+        for (int gx = BOARD_CELL; gx < w; gx += BOARD_CELL) {
+            for (int gy = BOARD_CELL; gy < h; gy += BOARD_CELL) {
+                art.pixel(gx, gy, Palette.STEEL_FAINT);
+            }
+        }
+        // 棋盘那种 45° 斜点线：和面板底纹同一个口径（ditherRect 的 density=2），
+        // 立绘窗背后是活的星幕，压一层斜纹才读成"一块屏"而不是透明洞。
+        // 线色仍是提亮而不是压暗：面板底 HALFTONE 是深蓝，压在深空上根本看不见。
+        com.hysx.salvosequence.core.Color hatch =
+                com.hysx.salvosequence.core.Color.rgb(126, 158, 182, 0.13);
+        for (int y = 2; y < h - 2; y++) {
+            for (int x = 2 + Math.floorMod(-y, 3); x < w - 2; x += 3) {
+                if (!inCutCorner(x, y, w, h, cut)) {
+                    art.pixel(x, y, hatch);
+                }
+            }
+        }
+    }
+
+    /** 点是否落在被切角切掉的那四个角块里（切角是三角，按整块方角跳更保守）。 */
+    private static boolean inCutCorner(int x, int y, int w, int h, int cut) {
+        boolean side = x < cut || x >= w - cut;
+        boolean edge = y < cut || y >= h - cut;
+        return side && edge;
+    }
+
+    /** 立绘压上来之后补回窗口框线：让人物被"裁"在窗口里，而不是糊到屏幕边缘。 */
+    private void drawPortraitFrameEdge(PixelArt art) {        UiChrome.chamferFrame(art, 0, 0, 120, 268, UiChrome.CUT, Palette.STEEL_DIM);
+        UiChrome.chamferFrame(art, 2, 2, 116, 264,
+                Math.max(1, UiChrome.CUT - 2), Palette.STEEL_FAINT);
+        UiChrome.brackets(art, 0, 0, 120, 268, 2, Palette.AMBER, 5);
+    }
+
+    /** 指令卡：长条，左能量、中图标、右装填。 */
+    private void drawHandBars(CanvasBuffer buffer, PixelArt art) {
+        Battle battle = run.battle();
+        List<Card> hand = hand();
+        int count = Math.min(CARD_MAX, hand.size());
+        // 悬停那张卡最后画：说明框压在它下面，只有卡片自己的两个切角露出一点说明
+        int hovered = hoveredOption >= 0 && hoveredOption < count ? hoveredOption : -1;
+        // 空卡槽：托盘里留一圈几乎看不见的轮廓，手牌不满时也看得出还剩几个位置
+        for (int i = count; i < CARD_MAX; i++) {
+            drawEmptyCardSlot(art, i);
+        }
+        for (int i = 0; i < count; i++) {
+            if (i == hovered) {
+                continue;
+            }
+            int[] box = cardBarRect(i);
+            boolean playable = battle != null && battle.canPlay(i);
+            drawCardBar(buffer, art, hand.get(i), box[0], box[1], box[2], box[3],
+                    false, playable, i + 1);
+        }
+        if (hand.isEmpty()) {
+            zh(buffer, Language.t("手牌空了 —— 空格结束回合", "HAND EMPTY - SPACE ENDS TURN"),
+                    CARD_X, CARD_Y + 4, 12, Palette.LINE_FAINT);
+            return;
+        }
+        // 描述弹在悬停那张卡的正上方，盖住上面那张卡（不跟鼠标跑，指针乱晃也不会跳）；
+        // 弹窗本身画在悬停卡下面——底边虽然伸到卡片中线，实际只有卡片切角处露出来
+        drawCardPopup(buffer, art, hovered);
+        if (hovered >= 0) {
+            int[] box = cardBarRect(hovered);
+            boolean playable = battle != null && battle.canPlay(hovered);
+            drawCardBar(buffer, art, hand.get(hovered), box[0], box[1], box[2], box[3],
+                    true, playable, hovered + 1, true);
+        }
+    }
+
+    /**
+     * 指令卡说明：比卡片宽一圈（156px）的浮牌，横向居中压在卡片上。
+     *
+     * <p>最上面那一行没有"上面"可用（会顶出画布），改成往下弹；
+     * 文字按浮牌宽度折行，最多 6 行，超出的截断。</p>
+     */
+    private void drawCardPopup(CanvasBuffer buffer, PixelArt art, int index) {
+        List<Card> hand = hand();
+        if (index < 0 || index >= hand.size() || index >= CARD_MAX) {
+            return;
+        }
+        Card card = hand.get(index);
+        Battle battle = run.battle();
+        // 说明牌固定一个够宽的宽度（约 13 个汉字），不跟卡片同宽：
+        // 卡片缩到 93 后按卡宽折行会把整句切碎、末尾全是省略号
+        int w = 156;
+        List<String> lines = new ArrayList<>(wrap(card.textZh(), 12));
+        if (battle != null) {
+            // 费用/装填/倍率压成一行，号码之间只留空格；倍数不再写 ×，直接写数字
+            lines.add("费用 " + card.cost() + "  装填 " + card.reload()
+                    + "  倍率 " + battle.multiplierOfCardId(card.id()));
+        }
+        while (lines.size() > 6) {
+            lines.remove(lines.size() - 1);
+        }
+        // 12px 中文字形几乎没有下缘留白，行距必须给到 13，否则两行会贴在一起
+        int textH = 20 + lines.size() * 13;
+        int[] box = cardBarRect(index);
+        int x = box[0] + (box[2] - w) / 2;
+        x = Math.max(2, Math.min(640 - w - 2, x));
+        // 底边压到这张卡的竖直中线（这一截藏在卡片下面），文字那部分整体留在卡片上沿之上
+        int hidden = box[3] / 2;
+        int h = textH + hidden;
+        int cardMid = box[1] + hidden;
+        int y = cardMid - h;
+        boolean below = false;
+        if (y < BOARD_Y) {
+            // 上面放不下就翻到卡片下方：顶边落在中线，文字从卡片下沿之外开始
+            below = true;
+            y = cardMid;
+        }
+        y = Math.max(0, Math.min(360 - h, y));
+        cardPopupBelow = below;
+        // 四角和卡片一样切掉 45° 三角（八边形），上下都切，不再只切"露在外面"的两角
+        int c = CARD_CHAMFER;
+        double[] bx = {x + c, x + w - c, x + w, x + w, x + w - c, x + c, x, x};
+        double[] by = {y, y, y + c, y + h - c, y + h, y + h, y + h - c, y + c};
+        art.polygon(bx, by, Palette.PANEL);
+        art.polygonOutline(bx, by, Palette.CYAN);
+        int textTop = below ? y + hidden : y;
+        zh(buffer, fit(card.nameZh(), 12, w - 10), x + 5, textTop + 4, 12, Palette.CYAN);
+        int ty = textTop + 20;
+        for (int i = 0; i < lines.size(); i++) {
+            // 最后一行是费用/装填/倍率，压暗一档，和卡面说明分开
+            boolean stat = i == lines.size() - 1;
+            zh(buffer, fit(lines.get(i), 12, w - 10), x + 5, ty, 12,
+                    stat ? Palette.LINE_DIM : Palette.LINE);
+            ty += 13;
+        }
+    }
+
+    /** 空卡槽：只描一圈暗八边形，不填底、不写字——像空着的硬件插槽。 */
+    private void drawEmptyCardSlot(PixelArt art, int index) {
+        int[] box = cardBarRect(index);
+        int x = box[0];
+        int y = box[1];
+        int w = box[2];
+        int h = box[3];
+        int c = CARD_CHAMFER;
+        double[] xs = {x + c, x + w - c, x + w, x + w, x + w - c, x + c, x, x};
+        double[] ys = {y, y, y + c, y + h - c - 1, y + h - 1, y + h - 1,
+                y + h - c - 1, y + c};
+        art.polygonOutline(xs, ys, Palette.PANEL_EDGE);
+    }
+
+    private void drawCardBar(CanvasBuffer buffer, PixelArt art, Card card, int x, int y,
+                             int w, int h, boolean hovered, boolean playable, int slot) {
+        drawCardBar(buffer, art, card, x, y, w, h, hovered, playable, slot, false);
+    }
+
+    /**
+     * @param popupOpen 这张卡上方正压着说明浮牌：悬停的琥珀顶线照画，画完在同位置用背景色
+     *                  盖一道——只想让"信息底部的黄线"露出来，卡牌上缘不要多出一条黄线。
+     */
+    private void drawCardBar(CanvasBuffer buffer, PixelArt art, Card card, int x, int y,
+                             int w, int h, boolean hovered, boolean playable, int slot,
+                             boolean popupOpen) {
+        com.hysx.salvosequence.core.Color edge = hovered ? Palette.CYAN
+                : playable ? Palette.LINE_DIM : Palette.LINE_FAINT;
+        // 四角各切掉腰长 CARD_CHAMFER 的三角形（八边形），左右两端再挂消耗/装填菱形
+        int c = CARD_CHAMFER;
+        double[] xs = {x + c, x + w - c, x + w, x + w, x + w - c, x + c, x, x};
+        double[] ys = {y, y, y + c, y + h - c-1, y + h-1, y + h-1, y + h - c-1, y + c};
+        // 卡片压在指令台上：先铺一块右下 2px 的投影，悬停再多 1px —— 手牌"抬起来"的手感
+        int lift = hovered ? 3 : 2;
+        double[] sxs = new double[xs.length];
+        double[] sys = new double[ys.length];
+        for (int i = 0; i < xs.length; i++) {
+            sxs[i] = xs[i] + lift;
+            sys[i] = ys[i] + lift;
+        }
+        art.polygon(sxs, sys, com.hysx.salvosequence.core.Color.rgb(0, 0, 0, 0.55));
+        art.polygon(xs, ys, Palette.PANEL_ALT);
+        art.polygonOutline(xs, ys, edge);
+        // 内层再收一道暗线，卡片才有厚度；悬停时上缘补一条琥珀高亮
+        art.polygonOutline(new double[]{x + c - 1, x + w - c + 1, x + w - 1, x + w - 1,
+                x + w - c + 1, x + c - 1, x + 1, x + 1},
+                new double[]{y + 1, y + 1, y + c - 1, y + h - c, y + h - 2, y + h - 2,
+                        y + h - c, y + c - 1}, Palette.STEEL_FAINT);
+        if (hovered) {
+            art.hline(x + c, x + w - c - 1, y + 1, Palette.AMBER);
+            if (popupOpen) {
+                // 说明浮牌压着这张卡：同位置再描一条卡面背景色，把这条琥珀线遮掉
+                art.hline(x + c, x + w - c - 1, y + 1, Palette.PANEL_ALT);
+            }
+        }
+        if (popupOpen) {
+            // 浮牌在卡片下面一层，遮不住卡片自己的边框——只能在卡片上、贴着浮牌的那条边
+            // 用浮牌底色再描一条，让卡面上缘不露出第二道黄线（浮牌底边的黄线在下面，保留）
+            int edgeY = cardPopupBelow ? y + h - 1 : y;
+            art.hline(x + c, x + w - c, edgeY, Palette.PANEL);
+        }
+        drawCostDiamond(art, x + 12, y + h / 2, 6, card.cost(), playable);
+        // 图标位置先用卡名顶着：图标还没设计，空着看不出这张卡是什么
+        int nameW = w - 22 - 18;
+        String iconText = fit(Language.t(card.nameZh(), card.nameEn()), 12, nameW);
+        double textW = textWidth(iconText, 12);
+        zh(buffer, iconText, (int) Math.round(x + 20 + (nameW - textW) / 2), y + h / 2 - 6,
+                12, playable ? Palette.LINE : Palette.LINE_DIM);
+        drawReloadDiamond(art, card, x + w - 11, y + h / 2, 6);
+    }
+
+    /**
+     * 消耗菱形：外圈描边，里面每个能量一颗小菱形——"几颗菱形就是几点能量"，
+     * 和右下角的能量点用同一套读数语言，扫一眼就能对账。
+     */
+    private void drawCostDiamond(PixelArt art, int cx, int cy, int r, int cost, boolean playable) {
+        com.hysx.salvosequence.core.Color edge = playable ? Palette.WARN : Palette.LINE_FAINT;
+        diamond(art, cx, cy, r, edge);
+        drawDiamondPips(art, cx, cy, cost, edge);
+    }
+
+    /**
+     * 把 0~4 颗小菱形摆进框里：1 颗正中、2 颗左右、3 颗三角、4 颗四向。
+     * 小菱形只有 3×3，中心间距 ≥2，数量数得清，也不会顶到外框。
+     */
+    private void drawDiamondPips(PixelArt art, int cx, int cy, int count,
+                                 com.hysx.salvosequence.core.Color color) {
+        int n = Math.min(4, Math.max(0, count));
+        int[][] spots = switch (n) {
+            case 1 -> new int[][]{{0, 0}};
+            case 2 -> new int[][]{{-3, 0}, {3, 0}};
+            case 3 -> new int[][]{{0, -3}, {-3, 0}, {3, 0}};
+            case 4 -> new int[][]{{0, -3},  {-3, 0}, {3, 0}, {0, 3}};
+            default -> new int[0][];
+        };
+        for (int[] spot : spots) {
+            fillDiamond(art, cx + spot[0], cy + spot[1], 3, color);
+        }
+    }
+
+    /**
+     * 装填菱形：和费用菱形同一套读数——几颗小菱形就是几回合装填，不再写数字。
+     * 底色/描边/小菱形都按卡型分色：红=伤害、蓝=格挡/回复、琥珀=特殊。
+     */
+    private void drawReloadDiamond(PixelArt art, Card card, int cx, int cy, int r) {
+        // 装填 0 的卡也保留这颗菱形：右端空着会被当成排版漏了一格，
+        // 一律画出外框，只是里面不放小菱形——"这卡不用装填"本身也是信息
+        int damage = card.baseDamage();
+        int block = card.blockValue();
+        boolean special = card.kind() == CardKind.SPECIAL;
+        com.hysx.salvosequence.core.Color base = special ? PixelArt.fromArgb(0x66665010)
+                : damage > 0 ? PixelArt.fromArgb(0x66402A26)
+                : block > 0 ? PixelArt.fromArgb(0x66202E4A)
+                : Palette.PANEL_ALT;
+        com.hysx.salvosequence.core.Color edge = special ? Palette.WARN
+                : damage > 0 ? Palette.LOCK
+                : block > 0 ? Palette.BLUE
+                : Palette.LINE_DIM;
+        fillDiamond(art, cx, cy, r, base);
+        diamond(art, cx, cy, r, edge);
+        drawDiamondPips(art, cx, cy, card.reload(), edge);
+    }
+
+    /**
+     * 卡片图标：攻击=光矛，格挡=盾，特殊=十字星，其余=方点。
+     *
+     * <p>暂时没有启用——卡面中间那一格现在直接写卡名（见 {@code drawCardBar}）。
+     * 真正的图标画出来后，把那一行文字换回这里的调用即可。</p>
+     */
+    private void drawCardIcon(PixelArt art, Card card, int x, int cy, int w, int h,
+                              boolean playable) {
+        int ix = x + (w - 13) / 2;
+        int iy = cy - 7;
+        drawCardIcon(art, card, ix, iy, playable);
+    }
+
+    private void drawCardIcon(PixelArt art, Card card, int x, int y, boolean playable) {
+        com.hysx.salvosequence.core.Color c = playable ? Palette.LINE : Palette.LINE_FAINT;
+        if (card.isAttack()) {
+            art.line(x, y + 7, x + 12, y + 7, c);
+            art.line(x + 12, y + 7, x + 9, y + 4, c);
+            art.line(x + 12, y + 7, x + 9, y + 10, c);
+            art.line(x, y + 7, x + 3, y + 4, Palette.LINE_FAINT);
+            art.line(x, y + 7, x + 3, y + 10, Palette.LINE_FAINT);
+        } else if (card.blockValue() > 0) {
+            squareIcon(art, x + 3, y + 2, 7, c);
+            art.line(x + 3, y + 9, x + 9, y + 9, Palette.LINE_FAINT);
+        } else if (card.kind() == CardKind.SPECIAL) {
+            art.line(x + 6, y + 1, x + 6, y + 13, Palette.WARN);
+            art.line(x + 1, y + 7, x + 11, y + 7, Palette.WARN);
+        } else {
+            squareIcon(art, x + 4, y + 5, 5, c);
+        }
+    }
+
+    private void squareIcon(PixelArt art, int x, int y, int s,
+                            com.hysx.salvosequence.core.Color c) {
+        art.line(x, y, x + s, y, c);
+        art.line(x + s, y, x + s, y + s, c);
+        art.line(x + s, y + s, x, y + s, c);
+        art.line(x, y + s, x, y, c);
+    }
+
+
+    /** 把文字裁到 maxW 宽，末尾加省略号（信息框/长条按钮里用）。 */
+    private String fit(String text, double size, double maxW) {
+        if (text == null) {
+            return "";
+        }
+        if (textWidth(text, size) <= maxW) {
+            return text;
+        }
+        StringBuilder b = new StringBuilder();
+        double w = 0;
+        for (int i = 0; i < text.length(); i++) {
+            double cw = text.charAt(i) < 0x2E80 ? size * 0.56 : size;
+            if (w + cw > maxW - size) {
+                break;
+            }
+            b.append(text.charAt(i));
+            w += cw;
+        }
+        return b + "…";
+    }
+    /** 第 i 张指令卡的长条位置（3 列 × 3 行）。 */
+    /**
+     * 第 index 张手牌的矩形。绘制和点击热区都走这里，所以两者永远一致。
+     *
+     * <p>优先读界面绘制器导出的 {@code .uilab}（启动参数 {@code -Dsalvo.ui}）：
+     * 文件里 {@code card.slot.N} 有就用手摆的位置，没有就退回代码里的
+     * {@link #CARD_SLOTS}。这样"用编辑器挪一挪"不需要改代码重编译。</p>
+     */
+    private int[] cardBarRect(int index) {
+        if (index >= 0) {
+            // 第一优先：Aseprite 切出来的界面数据（-Dsalvo.ase），图层/切片名就是元素 id
+            com.hysx.salvosequence.core.AseUi ase = com.hysx.salvosequence.core.AseUi.active();
+            int[] fromAse = ase == null ? null : ase.slice("card.slot." + index);
+            if (fromAse != null && fromAse[2] > 0 && fromAse[3] > 0) {
+                return fromAse;
+            }
+            int[] fromFile = com.hysx.salvosequence.core.UiLayout.active()
+                    .rect("card.slot." + index);
+            if (fromFile != null && fromFile[2] > 0 && fromFile[3] > 0) {
+                return fromFile;
+            }
+        }
+        if (index < 0 || index >= CARD_SLOTS.length) {
+            return new int[]{CARD_X, CARD_Y, CARD_W, CARD_H};
+        }
+        return new int[]{CARD_SLOTS[index][0], CARD_SLOTS[index][1], CARD_W, CARD_H};
+    }
+
     private void drawHand(CanvasBuffer buffer, PixelArt art) {
         List<Card> hand = hand();
         Battle battle = run.battle();
@@ -3229,7 +4610,7 @@ public final class CardLoopScreen implements Screen {
             zh(buffer, Language.t("手牌空了 —— 空格结束回合", "HAND EMPTY - SPACE ENDS TURN"),
                     CARD_X + 4, CARD_Y + 4, 12, Palette.LINE_FAINT);
         }
-        int rowY = CARD_Y + CARD_SIZE + 4;
+        int rowY = CARD_Y + CARD_H + 4;
         zh(buffer, Language.t(
                         "牌库 " + battle.drawPile().size()
                                 + "  弃牌 " + battle.discard().size()
@@ -3250,11 +4631,15 @@ public final class CardLoopScreen implements Screen {
     private void drawCardSquare(CanvasBuffer buffer, PixelArt art, Card card, int x, int y,
                                 int size, boolean hovered, int multiplier, int slot,
                                 boolean playable) {
-        com.hysx.salvosequence.core.Color edge = hovered ? Palette.CYAN : Palette.LINE_DIM;
-        art.rect(x, y, size, size, Palette.PANEL_ALT);
-        art.frame(x, y, size, size, edge);
+        // 手牌：悬浮换成琥珀高亮板，平时是普通切角板
+        if (hovered) {
+            UiChrome.hotPanel(art, x, y, size, size);
+        } else {
+            UiChrome.panel(art, x, y, size, size, Palette.PANEL_ALT,
+                    playable ? Palette.STEEL : Palette.STEEL_DIM, false);
+        }
         // 费用徽标
-        art.rect(x + 1, y + 1, 9, 9, playable ? Palette.WARN : Palette.PANEL_EDGE);
+        art.rect(x + 1, y + 1, 9, 9, playable ? Palette.AMBER : Palette.PANEL_EDGE);
         en(art, String.valueOf(card.cost()), x + 3, y + 2, playable ? Palette.BACKDROP : Palette.LINE_FAINT);
         // 名字（中文 3 字一行 / 英文 5 字一行，最多两行；徽标右侧只有 32 点宽）
         List<String> lines = wrap(Language.t(card.nameZh(), card.nameEn()),
@@ -3294,21 +4679,12 @@ public final class CardLoopScreen implements Screen {
      * 垂直先贴鼠标上方，顶到棋盘上缘就挪到下方。
      */
     private void drawSidePanel(CanvasBuffer buffer, PixelArt art) {
-        // 1) 悬浮的战利品/手牌
-        int option = hoveredOption;
-        List<int[]> boxes = optionRects();
-        if (option >= 0 && option < boxes.size() && stage() == Run.Stage.BATTLE
-                && option < hand().size()) {
-            Card card = hand().get(option);
-            Battle battle = run.battle();
-            List<String> lines = new ArrayList<>(wrap(card.textZh(), 15));
-            if (battle != null) {
-                lines.add("费用 " + card.cost() + "  倍率 x" + battle.multiplierOfCardId(card.id())
-                        + "  装填 " + card.reload());
-            }
-            renderDesc(buffer, art, Language.t(card.nameZh(), card.nameEn()), Palette.CYAN, lines);
+        // 正在拖棋子变阵：这一下不弹描述。弹窗跟着指针走，正好盖住要摆的那几格，
+        // 松手（dragShipId 清空）后自然恢复。
+        if (dragShipId != null) {
             return;
         }
+        // 悬浮手牌的说明改由 drawCardPopup 贴着卡片画（见 drawHandBars），这里不再跟鼠标弹
         // 2) 悬浮的敌舰
         List<FoeView> foes = foeViews();
         if (hoveredFoe >= 0 && hoveredFoe < foes.size()) {
@@ -3352,20 +4728,55 @@ public final class CardLoopScreen implements Screen {
             y = (int) mouseY + 16;
         }
         y = Math.max(BOARD_Y, Math.min(358 - h, y));
-        art.rect(x, y, DESC_W, h, Palette.PANEL);
+        // 浮窗贴在最上面一层：投影 + 左上亮边，跟其他面板同一套体积语言
+        UiChrome.dropShadow(art, x, y, DESC_W, h, 3, UiChrome.LIFT_POPUP);
+        art.fillRect(x, y, DESC_W, h, Palette.PANEL);
         art.frame(x, y, DESC_W, h, Palette.LINE_DIM);
+        art.hline(x + 1, x + DESC_W - 2, y, Palette.STEEL);
+        art.vline(y + 1, y + h - 2, x, Palette.STEEL);
         zh(buffer, title, x + 6, y + 4, 12, titleColor);
         int ty = y + 20;
         for (String line : lines) {
-            zh(buffer, line, x + 6, ty, 12, Palette.LINE);
+            zh(buffer, fitLine(line, DESC_W - 12), x + 6, ty, 12, Palette.LINE);
             ty += 14;
         }
+    }
+
+    /** 一行装不下就截断加省略号——描述里有整句台词，不能让它压到框外去。 */
+    private String fitLine(String line, double maxWidth) {
+        if (textWidth(line, 12) <= maxWidth) {
+            return line;
+        }
+        int cut = line.length();
+        while (cut > 1 && textWidth(line.substring(0, cut) + "…", 12) > maxWidth) {
+            cut--;
+        }
+        return line.substring(0, cut) + "…";
     }
 
     // ------------------------------------------------------------ 战术休整（波间）
 
     private static final int LULL_ROW_H = 14;
-    private static final int LULL_ROWS = 10;
+    private static final int LULL_ROWS = 11;
+    private static final int LULL_COLS = 3;
+    /** 一屏能摆下的牌库张数（3 列 × 11 行）。 */
+    private static final int LULL_CAP = LULL_ROWS * LULL_COLS;
+
+    /**
+     * 牌库第 {@code index} 张在面板里的位置：3 列，列内从上往下排。
+     *
+     * <p>绘制和热区都用这一个函数——以前两边各写一份 y 起点（62 和 78），
+     * 于是点到的行和看到的行差着一整行。</p>
+     */
+    private int[] lullCardRect(int index) {
+        int colW = (PORT_PANEL_W - 10) / LULL_COLS;
+        // 逐行填：先从左到右占满一行，再下一行——这样十几张牌也能摊成三列，
+        // 而不是把第一列塞满、右边两列空着
+        int col = index % LULL_COLS;
+        int row = index / LULL_COLS;
+        return new int[]{PORT_PANEL_X + 4 + col * colW, BOARD_Y + 56 + row * LULL_ROW_H,
+                colW - 2, LULL_ROW_H - 2};
+    }
 
     /**
      * 战术休整面板：不另开页面，直接占右栏——原来敌方棋盘的位置空出来了，
@@ -3374,39 +4785,40 @@ public final class CardLoopScreen implements Screen {
      */
     private void drawLullPanel(CanvasBuffer buffer, PixelArt art) {
         int px = PORT_PANEL_X;
-        int pw = PORT_BOARD_X - 4 - px;
+        int pw = PORT_PANEL_W;
         art.rect(px, BOARD_Y, pw, BOARD_SPAN, Palette.PANEL);
         art.frame(px, BOARD_Y, pw, BOARD_SPAN, Palette.LINE_DIM);
         zh(buffer, Language.t("战术休整", "TACTICAL LULL"), px + 6, BOARD_Y + 4, 12, Palette.CYAN);
         zh(buffer, Language.t("第 " + run.wave() + "/" + run.waveCount() + " 波已清空",
                         "WAVE " + run.wave() + "/" + run.waveCount() + " CLEAR"),
                 px + 108, BOARD_Y + 5, 12, Palette.WARN);
-        zh(buffer, Language.t("拖左边的船变阵（和太空港一样）",
-                        "DRAG SHIPS ON THE LEFT BOARD"), px + 6, BOARD_Y + 22, 12, Palette.LINE);
-        zh(buffer, Language.t("最靠右的先挨打；点一行牌库禁掉，本节点不抽它",
-                        "RIGHTMOST TAKES HITS; TAP A CARD TO BAN IT"),
+        zh(buffer, fit(Language.t("拖左边的船变阵（和太空港一样）",
+                        "DRAG SHIPS ON THE LEFT BOARD"), 12, pw - 12),
+                px + 6, BOARD_Y + 22, 12, Palette.LINE);
+        zh(buffer, fit(Language.t("最靠右的先挨打；点一行牌库禁掉，本节点不抽它",
+                        "RIGHTMOST TAKES HITS; TAP A CARD TO BAN IT"), 12, pw - 12),
                 px + 6, BOARD_Y + 38, 12, Palette.LINE_FAINT);
 
-        int listY = BOARD_Y + 62;
         var deck = restDeck();
-        for (int i = 0; i < deck.size() && i < LULL_ROWS; i++) {
+        for (int i = 0; i < deck.size() && i < LULL_CAP; i++) {
             var card = deck.get(i);
-            int top = listY + i * LULL_ROW_H;
+            int[] box = lullCardRect(i);
             boolean on = i == lullCursor;
             boolean banned = run.isCardBanned(card.id());
             if (on) {
-                art.fillRect(px + 4, top - 2, pw - 10, LULL_ROW_H - 2, Palette.PANEL_ALT);
+                art.fillRect(box[0], box[1], box[2], box[3] + 1, Palette.PANEL_ALT);
             }
-            zh(buffer, card.nameZh(), px + 8, top, 12,
+            zh(buffer, fit(card.nameZh(), 12, box[2] - (banned ? 16 : 6)),
+                    box[0] + 3, box[1] + 1, 12,
                     banned ? Palette.LINE_FAINT : (on ? Palette.CYAN : Palette.LINE));
             if (banned) {
-                zh(buffer, Language.t("禁", "BAN"), px + pw - 32, top, 12, Palette.WARN);
+                zh(buffer, Language.t("禁", "BAN"), box[0] + box[2] - 14, box[1] + 1, 12, Palette.WARN);
             }
         }
-        if (deck.size() > LULL_ROWS) {
-            zh(buffer, Language.t("… 还有 " + (deck.size() - LULL_ROWS) + " 张",
-                            "+" + (deck.size() - LULL_ROWS) + " MORE"),
-                    px + 8, listY + LULL_ROWS * LULL_ROW_H, 12, Palette.LINE_FAINT);
+        if (deck.size() > LULL_CAP) {
+            zh(buffer, Language.t("… 还有 " + (deck.size() - LULL_CAP) + " 张",
+                            "+" + (deck.size() - LULL_CAP) + " MORE"),
+                    px + 8, BOARD_Y + 56 + LULL_ROWS * LULL_ROW_H, 12, Palette.LINE_FAINT);
         }
 
         int departY = BOARD_Y + BOARD_SPAN - 22;
@@ -3418,8 +4830,10 @@ public final class CardLoopScreen implements Screen {
     private ScreenContext lullKey(String code) {
         var deck = restDeck();
         switch (code) {
-            case "UP" -> lullCursor = Math.max(0, lullCursor - 1);
-            case "DOWN" -> lullCursor = Math.min(Math.max(0, deck.size() - 1), lullCursor + 1);
+            case "UP" -> lullCursor = Math.max(0, lullCursor - LULL_COLS);
+            case "DOWN" -> lullCursor = Math.min(Math.max(0, deck.size() - 1), lullCursor + LULL_COLS);
+            case "LEFT" -> lullCursor = Math.max(0, lullCursor - 1);
+            case "RIGHT" -> lullCursor = Math.min(Math.max(0, deck.size() - 1), lullCursor + 1);
             case "ENTER" -> toggleRestCard();
             case "SPACE" -> departNextWave();
             default -> {
@@ -3465,13 +4879,12 @@ public final class CardLoopScreen implements Screen {
 
     private void collectLullHotspots(HotspotSink sink) {
         int px = PORT_PANEL_X;
-        int pw = PORT_BOARD_X - 4 - px;
+        int pw = PORT_PANEL_W;
         var deck = restDeck();
-        int listY = BOARD_Y + 78;
-        for (int i = 0; i < deck.size() && i < LULL_ROWS; i++) {
-            int top = listY + i * LULL_ROW_H;
+        for (int i = 0; i < deck.size() && i < LULL_CAP; i++) {
+            int[] box = lullCardRect(i);
             int row = i;
-            sink.add(px + 4, top - 2, pw - 10, LULL_ROW_H - 2, () -> {
+            sink.add(box[0], box[1], box[2], box[3] + 1, () -> {
                 lullCursor = row;
                 toggleRestCard();
             });
@@ -3482,7 +4895,7 @@ public final class CardLoopScreen implements Screen {
     // ---------------------------------------------------------------- 覆盖层
 
     private void drawOverlay(CanvasBuffer buffer, PixelArt art) {
-        art.rect(0, 0, 640, 360, PixelArt.fromArgb(0x99000000));
+        UiChrome.scrim(art, 0, 0, 640, 360);
         String title = switch (stage()) {
             case PICK_LOADOUT -> Language.t("选择主角：每人一套起始舰队",
                     "CHOOSE CAPTAIN: EACH WITH A STARTER FLEET");
@@ -3499,14 +4912,58 @@ public final class CardLoopScreen implements Screen {
             case LOST -> Language.t("舰队全灭", "FLEET DESTROYED");
             case BATTLE -> "";
         };
-        zh(buffer, title, OV_X, OV_Y - 20, 12, Palette.CYAN);
-
+        // 整块选项区装进一个切角视窗：羊皮纸牌标功能名，后面跟一句正文说明
         List<int[]> boxes = optionRects();
+        int bx0 = OV_X;
+        int bx1 = OV_X + OV_W;
+        int by0 = OV_Y;
+        int by1 = OV_Y + OV_ROW_H;
+        if (!boxes.isEmpty()) {
+            bx0 = 640;
+            bx1 = 0;
+            by0 = 360;
+            by1 = 0;
+            for (int[] b : boxes) {
+                bx0 = Math.min(bx0, b[0]);
+                by0 = Math.min(by0, b[1]);
+                bx1 = Math.max(bx1, b[0] + b[2]);
+                by1 = Math.max(by1, b[1] + b[3]);
+            }
+        }
+        int px = Math.max(4, bx0 - 14);
+        int pw = Math.min(632 - px, bx1 - px + 14);
+        int py = Math.max(4, by0 - 36);
+        int ph = Math.min(356 - py, by1 - py + 14);
+        UiChrome.panel(art, px, py, pw, ph);
+        String plateText = switch (stage()) {
+            case PICK_LOADOUT -> Language.t("选择主角", "CAPTAIN");
+            case REWARD -> Language.t("战利品", "SALVAGE");
+            case SLOT -> Language.t("编入船位", "DEPLOY");
+            case WON -> Language.t("通关", "VICTORY");
+            case LOST -> Language.t("全灭", "DEFEAT");
+            default -> Language.t("星图", "STAR MAP");
+        };
+        int plateW = (int) Math.ceil(UiChrome.textWidth(plateText, 12)) + 18;
+        UiChrome.plate(buffer, art, px + 10, py + 6, plateW, 17, plateText);
+        String caption = title.contains("：") ? title.substring(title.indexOf("：") + 1) : "";
+        if (!caption.isEmpty()) {
+            UiChrome.zh(buffer, caption, px + 10 + plateW + 8, py + 8, 12, Palette.LINE_DIM);
+        }
+        UiChrome.divider(art, px + 8, py + 27, pw - 16);
+
         for (int i = 0; i < boxes.size(); i++) {
             int[] box = boxes.get(i);
             boolean hovered = i == hoveredOption;
-            art.rect(box[0], box[1], box[2], box[3], Palette.BACKDROP);
-            art.frame(box[0], box[1], box[2], box[3], hovered ? Palette.CYAN : Palette.PANEL_EDGE);
+            if (hovered) {
+                UiChrome.hotPanel(art, box[0], box[1], box[2], box[3]);
+            } else {
+                UiChrome.chamferFill(art, box[0], box[1], box[2], box[3], 3, Palette.BACKDROP);
+                UiChrome.chamferFrame(art, box[0], box[1], box[2], box[3], 3, Palette.STEEL_DIM);
+                UiChrome.brackets(art, box[0], box[1], box[2], box[3], 1, Palette.STEEL_FAINT, 4);
+            }
+            UiChrome.latin(art, String.format("%02d", i + 1),
+                    box[0] + box[2] - 16, box[1] + 3,
+                    hovered ? Palette.INK : Palette.LINE_FAINT);
             drawOption(buffer, art, i, box[0], box[1], box[2], box[3]);
         }
         if (stage() == Run.Stage.SLOT) {
@@ -3525,30 +4982,22 @@ public final class CardLoopScreen implements Screen {
     private void drawOption(CanvasBuffer buffer, PixelArt art, int index, int x, int y, int w, int h) {
         switch (stage()) {
             case PICK_LOADOUT -> {
-                ShipCatalog.Starter starter = run.starters().get(index);
+                var starter = run.starters().get(index);
                 Fleet fleet = starter.fleet();
-                String head = (index + 1) + "  "
-                        + Language.t(starter.nameZh(), starter.nameEn());
-                zh(buffer, head, x + 6, y + 3, 12, Palette.LINE);
-                double hx = x + 6 + textWidth(head, 12) + 10;
+                String head = Language.t(starter.nameZh(), starter.nameEn());
+                zh(buffer, head, x + 8, y + 4, 12, Palette.LINE);
+                double hx = x + 8 + textWidth(head, 12) + 10;
                 String countText = Language.t(fleet.size() + " 艘", fleet.size() + " SHIPS");
-                zh(buffer, countText, (int) hx, y + 2, 12, Palette.LINE_FAINT);
+                zh(buffer, countText, (int) hx, y + 4, 12, Palette.LINE_FAINT);
                 String desc = starter.desc() == null ? "" : starter.desc();
-                int cap = Math.max(1, (w - 14) / 12);
-                if (desc.length() <= cap) {
-                    zh(buffer, fitted(desc, w - 14), x + 6, y + 19, 10, Palette.LINE_DIM);
-                } else {
-                    zh(buffer, fitted(desc.substring(0, cap), w - 14), x + 6, y + 19, 10,
-                            Palette.LINE_DIM);
-                    zh(buffer, fitted(desc.substring(cap), w - 14), x + 6, y + 30, 10,
-                            Palette.LINE_DIM);
-                }
+                // 说明只留一行（12px 光栅下两行会压到下面的读数），读数单独一行
+                zh(buffer, fitted(desc, w - 18), x + 8, y + 21, 12, Palette.LINE_DIM);
                 String stats = Language.t(
                         "结构 " + fleet.maxHp() + " 护甲 " + fleet.armor()
                                 + " 能量 " + fleet.maxEnergy() + " 牌组 " + fleet.deckSize(),
                         "HP " + fleet.maxHp() + " AR " + fleet.armor()
                                 + " EN " + fleet.maxEnergy() + " DECK " + fleet.deckSize());
-                zh(buffer, stats, x + 6, y + 41, 12, Palette.OK);
+                zh(buffer, stats, x + 8, y + 37, 12, Palette.OK);
             }
             case REWARD -> {
                 Reward reward = run.rewards().get(index);
@@ -3556,13 +5005,12 @@ public final class CardLoopScreen implements Screen {
                 if (reward.ship() != null) {
                     ShipPainter.drawIcon(art, reward.ship(), x + 6, y + 4, 2, time);
                 } else {
-                    art.rect(x + 6, y + 4, 36, 20, Palette.PANEL_ALT);
-                    art.frame(x + 6, y + 4, 36, 20, Palette.CYAN_DIM);
-                    zh(buffer, Language.t("卡牌", "CARD"), x + 10, y + 8, 12, Palette.CYAN);
+                    UiChrome.chamferFill(art, x + 6, y + 4, 36, 20, 3, Palette.PANEL_ALT);
+                    UiChrome.chamferFrame(art, x + 6, y + 4, 36, 20, 3, Palette.AMBER_DIM);
+                    zh(buffer, Language.t("卡牌", "CARD"), x + 10, y + 8, 12, Palette.AMBER);
                 }
                 int textX = x + 48;
-                String rewardTitle = Language.t((index + 1) + "  " + reward.titleZh(),
-                        (index + 1) + "  " + reward.subtitleEn());
+                String rewardTitle = Language.t(reward.titleZh(), reward.subtitleEn());
                 zh(buffer, rewardTitle, textX, y + 3, 12, Palette.LINE);
                 // 读数在第二行的右端，描述占满整行宽度（别再给它让位，中文一句话会被截断）
                 int statW = 0;
@@ -3579,13 +5027,12 @@ public final class CardLoopScreen implements Screen {
             case SLOT -> {
                 List<FleetUnit> spots = candidates();
                 FleetUnit spot = spots.get(index);
-                zh(buffer, (index + 1) + "  " + spot.x() + "/" + spot.y(), x + 6, y + 3, 12,
-                        Palette.LINE);
+                zh(buffer, spot.x() + "/" + spot.y(), x + 8, y + 4, 12, Palette.LINE);
                 zh(buffer, Language.t(spot.w() + "×" + spot.h(), spot.w() + "x" + spot.h()),
-                        x + 70, y + 3, 12, Palette.CYAN_DIM);
-                zh(buffer, Language.t("空位", "EMPTY"), x + 120, y + 3, 12, Palette.LINE_DIM);
+                        x + 64, y + 4, 12, Palette.CYAN_DIM);
+                zh(buffer, Language.t("空位", "EMPTY"), x + 116, y + 4, 12, Palette.LINE_DIM);
                 en(art, index == slotPreview ? "<--" : "", x + w - 30, y + 5,
-                        index == slotPreview ? Palette.CYAN : Palette.LINE_FAINT);
+                        index == slotPreview ? Palette.AMBER : Palette.LINE_FAINT);
             }
             default -> {
             }
@@ -3628,6 +5075,9 @@ public final class CardLoopScreen implements Screen {
         if (zoomShip) {
             hint = Language.t("Z 返回战斗视图 · 放大视图只读",
                     "Z BACK TO BATTLE · READ ONLY");
+        } else if (stage() == Run.Stage.MAP) {
+            // 星图自己的底部通栏已经写了操作提示，这里不再叠一行
+            return;
         } else if (stage() == Run.Stage.BATTLE) {
             hint = Language.t(
                     "1-6 / 点卡 出牌 · 空格 结束回合 · S 技能 · ←→ 换目标 · 拖船变阵 · G 火力 · Z 放大 · ESC 设置",
@@ -3648,14 +5098,14 @@ public final class CardLoopScreen implements Screen {
             hint = Language.t("空格 / R 再来一局 · ESC 回主菜单",
                     "SPACE / R RESTART · ESC MAIN MENU");
         }
-        zh(buffer, hint, 8, 348, 12, Palette.LINE_FAINT);
+        zh(buffer, hint, 64, 344, 12, Palette.LINE_FAINT);
         if (!debug) {
             return;
         }
         Battle battle = run.battle();
         if (battle != null) {
             zh(buffer, Language.t("G:自由 F:", "G:FREE F:") + foesAlive(),
-                    500, 348, 12, Palette.LINE_FAINT);
+                    500, 344, 12, Palette.LINE_FAINT);
         }
     }
 
@@ -3680,9 +5130,9 @@ public final class CardLoopScreen implements Screen {
         int w = (int) textWidth(toast, 12) + 12;
         int x = (640 - w) / 2;
         PixelArt art = buffer.art();
-        art.rect(x, 322, w, 16, Palette.BACKDROP);
-        art.frame(x, 322, w, 16, Palette.CYAN_DIM);
-        zh(buffer, toast, x + 6, 324, 12, Palette.CYAN);
+        art.rect(x, 180, w, 16, Palette.BACKDROP);
+        art.frame(x, 180, w, 16, Palette.CYAN_DIM);
+        zh(buffer, toast, x + 6, 182, 12, Palette.CYAN);
     }
 
     private void zh(CanvasBuffer buffer, String text, double x, double top, double size,
@@ -3737,11 +5187,13 @@ public final class CardLoopScreen implements Screen {
 
     private void button(PixelArt art, CanvasBuffer buffer, int x, int y, int w, int h,
                         String label, com.hysx.salvosequence.core.Color color) {
-        art.polygon(new double[]{x, x + w, x + w - 6, x - 6},
-                new double[]{y, y, y + h, y + h}, Palette.PANEL_ALT);
-        art.polygonOutline(new double[]{x, x + w, x + w - 6, x - 6},
-                new double[]{y, y, y + h, y + h}, color);
-        zh(buffer, label, x + 8, y + 3, 12, color);
+        double[] bx = {x, x + w, x + w - 6, x - 6};
+        double[] by = {y, y, y + h, y + h};
+        art.polygon(bx, by, Palette.PANEL_ALT);
+        art.polygonOutline(bx, by, color);
+        art.polygonOutline(new double[]{x + 1, x + w - 1, x + w - 7, x - 5},
+                new double[]{y + 1, y + 1, y + h - 1, y + h - 1}, Palette.STEEL_FAINT);
+        zh(buffer, label, x + 9, y + 3, 12, color);
     }
 
     private List<String> wrap(String text, int perLine) {
@@ -3840,6 +5292,44 @@ public final class CardLoopScreen implements Screen {
                 case SLOT -> run.placeAt(0);
                 case WON, LOST -> {
                     return;
+                }
+                default -> {
+                }
+            }
+        }
+    }
+
+    /**
+     * 调试：从星图跃迁到第一颗能打的星，把战斗盘面直接摆出来。
+     *
+     * <p>核对稿件要的是"真正的战斗界面"——{@link #debugFastForward(int)} 停在星图上，
+     * 盘面（顶栏/左面板/手牌/信息框）根本没被渲染过。</p>
+     */
+    public void debugJumpToBattle() {
+        int guard = 0;
+        while (run.stage() != Run.Stage.BATTLE && guard++ < 60 && !run.finished()) {
+            if (run.stage() == Run.Stage.PICK_LOADOUT) {
+                run.pickLoadout(0);
+                continue;
+            }
+            if (run.stage() != Run.Stage.MAP) {
+                // 跳到事件/休息/商店就退出来，别再往下推
+                return;
+            }
+            boolean jumped = false;
+            for (var st : run.reachableStars()) {
+                if (st.type() == Run.NodeType.BATTLE || st.type() == Run.NodeType.ELITE) {
+                    if (run.travelTo(st.id())) {
+                        jumped = true;
+                        break;
+                    }
+                }
+            }
+            if (!jumped) {
+                for (var st : run.reachableStars()) {
+                    if (run.travelTo(st.id())) {
+                        break;
+                    }
                 }
             }
         }

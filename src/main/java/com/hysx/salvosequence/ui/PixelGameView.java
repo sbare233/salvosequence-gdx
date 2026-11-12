@@ -202,7 +202,7 @@ public final class PixelGameView extends ApplicationAdapter {
 
         // 调试用：-Dsalvosequence.style=RAW|BLUR|BLOOM 可强制画质风格（截图核对后处理链）
         String forcedStyle = System.getProperty("salvosequence.style");
-        if (forcedStyle != null && !forcedStyle.isBlank()) {
+        if (forcedStyle != null && !forcedStyle.trim().isEmpty()) {
             try {
                 VideoSettings.setStyle(VideoSettings.Style.valueOf(
                         forcedStyle.trim().toUpperCase(java.util.Locale.ROOT)));
@@ -215,7 +215,7 @@ public final class PixelGameView extends ApplicationAdapter {
         }
         // 调试用：-Dsalvosequence.scanlineShape=STRAIGHT|JAGGED 强制扫描线形状
         String forcedShape = System.getProperty("salvosequence.scanlineShape");
-        if (forcedShape != null && !forcedShape.isBlank()) {
+        if (forcedShape != null && !forcedShape.trim().isEmpty()) {
             try {
                 VideoSettings.setScanlineShape(VideoSettings.ScanlineShape.valueOf(
                         forcedShape.trim().toUpperCase(java.util.Locale.ROOT)));
@@ -336,7 +336,7 @@ public final class PixelGameView extends ApplicationAdapter {
         if (smokeShotPending) {
             smokeShotPending = false;
             String shot = System.getProperty("salvosequence.smoke.png");
-            if (shot != null && !shot.isBlank()) {
+            if (shot != null && !shot.trim().isEmpty()) {
                 com.badlogic.gdx.graphics.Pixmap px =
                         com.badlogic.gdx.utils.ScreenUtils.getFrameBufferPixmap(
                                 0, 0, Gdx.graphics.getWidth(), Gdx.graphics.getHeight());

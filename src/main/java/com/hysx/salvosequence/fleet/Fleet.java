@@ -68,7 +68,7 @@ public final class Fleet {
 
     /** 建一支舰队（自带棋盘与额外卡）。 */
     public static Fleet of(String id, String nameZh, String nameEn, FleetBoard board, List<Card> bonusCards) {
-        if (id == null || id.isBlank()) {
+        if (id == null || id.trim().isEmpty()) {
             throw new IllegalArgumentException("舰队必须有 id");
         }
         if (board == null) {

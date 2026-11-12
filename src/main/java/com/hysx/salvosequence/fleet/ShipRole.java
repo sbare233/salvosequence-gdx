@@ -56,7 +56,7 @@ public enum ShipRole {
 
     /** 按 id / 枚举名 / 中文标签认一个职能，认不出返回 {@code null}。 */
     public static ShipRole byId(String raw) {
-        if (raw == null || raw.isBlank()) {
+        if (raw == null || raw.trim().isEmpty()) {
             return null;
         }
         String key = raw.trim().toUpperCase(Locale.ROOT).replace(' ', '_');

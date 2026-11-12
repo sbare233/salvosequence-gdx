@@ -124,7 +124,7 @@ public final class MidiCatalog {
         writeTsv(tsv, entries);
 
         long bad = entries.stream().filter(e -> !e.error.isEmpty()).count();
-        long withCopyright = entries.stream().filter(e -> !e.copyright.isBlank()).count();
+        long withCopyright = entries.stream().filter(e -> !e.copyright.trim().isEmpty()).count();
         System.out.println("[catalog] 扫描 " + entries.size() + " 个文件，读取失败 " + bad
                 + " 个，带内嵌版权声明 " + withCopyright + " 个");
         System.out.println("[catalog] 写出 " + md.toAbsolutePath());
@@ -189,14 +189,14 @@ public final class MidiCatalog {
                 String text = decode(mm.getData());
                 switch (mm.getType()) {
                     case META_COPYRIGHT -> {
-                        if (e.copyright.isBlank()) {
+                        if (e.copyright.trim().isEmpty()) {
                             e.copyright = text;
                         } else if (!e.copyright.contains(text)) {
                             e.copyright = e.copyright + " | " + text;
                         }
                     }
                     case META_TRACK_NAME -> {
-                        if (e.tracks > 1 && !text.isBlank() && names.length() < 200) {
+                        if (e.tracks > 1 && !text.trim().isEmpty() && names.length() < 200) {
                             if (names.length() > 0) {
                                 names.append(" / ");
                             }
@@ -208,7 +208,7 @@ public final class MidiCatalog {
                                 || text.startsWith("@KMIDI") || text.startsWith("@T")) {
                             e.karaokeText = true;
                         }
-                        if (e.title.isBlank() && looksLikeTitle(text)) {
+                        if (e.title.trim().isEmpty() && looksLikeTitle(text)) {
                             e.title = text;
                         }
                         if (others.length() < 300) {
@@ -280,7 +280,7 @@ public final class MidiCatalog {
         }
         String lower = e.name.toLowerCase(Locale.ROOT);
         List<String> commercial = new ArrayList<>();
-        if (!e.copyright.isBlank()) {
+        if (!e.copyright.trim().isEmpty()) {
             commercial.add("内嵌声明");
         }
         if (e.karaokeText) {
@@ -296,7 +296,7 @@ public final class MidiCatalog {
         }
         if (!commercial.isEmpty()) {
             e.risk = "商业作品";
-            e.evidence = String.join("; ", commercial) + (e.copyright.isBlank() ? "" : " " + e.copyright);
+            e.evidence = String.join("; ", commercial) + (e.copyright.trim().isEmpty() ? "" : " " + e.copyright);
             return;
         }
         for (String w : LOW_RISK_HINTS) {
@@ -307,7 +307,7 @@ public final class MidiCatalog {
             }
         }
         e.risk = "来源不明";
-        e.evidence = e.copyright.isBlank() ? "无任何元数据佐证" : e.copyright;
+        e.evidence = e.copyright.trim().isEmpty() ? "无任何元数据佐证" : e.copyright;
     }
 
     // ------------------------------------------------------------------ 输出
@@ -321,7 +321,7 @@ public final class MidiCatalog {
             w.println();
             long total = entries.size();
             long bad = entries.stream().filter(e -> !e.error.isEmpty()).count();
-            long withCr = entries.stream().filter(e -> !e.copyright.isBlank()).count();
+            long withCr = entries.stream().filter(e -> !e.copyright.trim().isEmpty()).count();
             long karaoke = entries.stream().filter(e -> e.karaokeText).count();
             long lyrics = entries.stream().filter(e -> e.lyrics).count();
             long bytes = entries.stream().mapToLong(e -> e.bytes).sum();

@@ -78,7 +78,7 @@ public final class AudioSelfTest {
      */
     private static boolean playRequested() {
         String env = System.getenv("AUDIO_PLAY");
-        if (env != null && !env.isBlank()) {
+        if (env != null && !env.trim().isEmpty()) {
             return !env.trim().equalsIgnoreCase("false") && !env.trim().equals("0");
         }
         return !Boolean.getBoolean("audio.silent");

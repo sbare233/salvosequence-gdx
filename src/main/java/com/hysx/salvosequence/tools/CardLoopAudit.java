@@ -186,6 +186,30 @@ public final class CardLoopAudit {
         });
         step(() -> export("audit-card-11-board.png", "board"));
 
+        // 第 12 张：真正的战斗盘面（顶栏 / 左面板 / 手牌 / 信息框一起入画）
+        step(() -> view.go(ScreenContext.Target.CARD));
+        step(() -> view.screens().finishTransition());
+        step(() -> press("1"));
+        step(() -> {
+            CardLoopScreen s = cardScreen();
+            if (s != null) {
+                s.debugJumpToBattle();
+                s.debugHoverCard(1);
+            }
+        });
+        step(() -> {
+            CardLoopScreen s = cardScreen();
+            System.out.println("[card-audit] hud stage = "
+                    + (s == null ? "null" : s.run().stage()));
+        });
+        step(() -> export("audit-card-12-hud.png", "hud"));
+        step(() -> {
+            CardLoopScreen s = cardScreen();
+            if (s != null) {
+                s.debugHoverCard(-1);
+            }
+        });
+
         step(() -> {
             System.out.println("[card-audit] 11 sheets -> " + outDir.getAbsolutePath());
             quit();

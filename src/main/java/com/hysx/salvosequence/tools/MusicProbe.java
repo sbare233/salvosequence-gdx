@@ -91,7 +91,7 @@ public final class MusicProbe {
                     int type = mm.getType();
                     if (type == 0x01 || type == 0x02 || type == 0x03) {
                         String s = new String(mm.getData(), java.nio.charset.StandardCharsets.ISO_8859_1).trim();
-                        if (!s.isBlank() && !texts.contains(s)) {
+                        if (!s.trim().isEmpty() && !texts.contains(s)) {
                             texts.add(s);
                         }
                     }

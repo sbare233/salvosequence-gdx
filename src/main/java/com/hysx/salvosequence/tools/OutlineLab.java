@@ -315,7 +315,7 @@ public final class OutlineLab {
 
     private static int readInt(String key, int fallback) {
         String v = System.getenv(key);
-        if (v == null || v.isBlank()) {
+        if (v == null || v.trim().isEmpty()) {
             return fallback;
         }
         try {

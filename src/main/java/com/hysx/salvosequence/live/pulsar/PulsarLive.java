@@ -43,7 +43,6 @@ public final class PulsarLive
 
     private NeutronStar star;
     private BeamParticles beams;
-    private FieldLines lines;
     private Bloom bloom;
     /** 最终合成目标：bloom 的 composite 落这里，再读回 ARGB。 */
     private com.badlogic.gdx.graphics.glutils.FrameBuffer out;
@@ -75,7 +74,6 @@ public final class PulsarLive
 
         star = new NeutronStar();
         beams = new BeamParticles();
-        lines = new FieldLines();
         bloom = new Bloom(FBW, FBH);
         out = new com.badlogic.gdx.graphics.glutils.FrameBuffer(
                 com.badlogic.gdx.graphics.Pixmap.Format.RGBA8888, FBW, FBH, false);
@@ -119,11 +117,6 @@ public final class PulsarLive
                     params.beamWidthDeg * com.badlogic.gdx.math.MathUtils.degreesToRadians,
                     params.beamBright, beamColor, 1.7f, beamSpin, 0.075f, t, 1.9f,
                     params.beamParticles);
-        }
-
-        if (params.fieldLines)
-        {
-            lines.render(viewProj, magModel, 0.32f);
         }
 
         bloom.endSceneAndComposite(params.bloomStrength, params.bloomThreshold, 1f);
@@ -207,7 +200,6 @@ public final class PulsarLive
         ready = false;
         star.dispose();
         beams.dispose();
-        lines.dispose();
         bloom.dispose();
         out.dispose();
         shapes.dispose();

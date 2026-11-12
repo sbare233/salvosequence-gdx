@@ -43,10 +43,10 @@ public record Module(
         String description) {
 
     public Module {
-        if (id == null || id.isBlank()) {
+        if (id == null || id.trim().isEmpty()) {
             throw new IllegalArgumentException("模块必须有 id");
         }
-        if (name == null || name.isBlank()) {
+        if (name == null || name.trim().isEmpty()) {
             throw new IllegalArgumentException("模块 " + id + " 必须有显示名");
         }
         if (shape == null || kind == null || layer == null) {

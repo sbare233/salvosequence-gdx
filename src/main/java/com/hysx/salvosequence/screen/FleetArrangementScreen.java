@@ -4,6 +4,9 @@ import com.hysx.salvosequence.core.CanvasBuffer;
 import com.hysx.salvosequence.core.Palette;
 import com.hysx.salvosequence.core.PixelArt;
 import com.hysx.salvosequence.core.PixelFont;
+import com.hysx.salvosequence.core.UiChrome;
+import com.hysx.salvosequence.core.UiDepth;
+import com.hysx.salvosequence.core.UiTilt;
 import com.hysx.salvosequence.fleet.AppearanceDesign;
 import com.hysx.salvosequence.fleet.Fleet;
 import com.hysx.salvosequence.fleet.FleetBoard;
@@ -340,6 +343,8 @@ public final class FleetArrangementScreen implements Screen {
     @Override
     public void collectHotspots(HotspotSink sink) {
         int span = FleetBoard.SIZE * CELL;
+        // 棋盘那一层是斜的：热区跟着同一个平面反变换，点哪格就落在哪格
+        sink.plane(UiTilt.BOARD);
         sink.drag(CANVAS_X, CANVAS_Y, span, span,
                 (mx, my) -> dragTo(mx, my),
                 (mx, my) -> {
@@ -347,6 +352,7 @@ public final class FleetArrangementScreen implements Screen {
                     // 按下即松（单击）也要能选中：管理器没有单独的 release 回调，
                     // 所以这里把 press 当作一次点击的开始，拖动的结束由下一帧 update 兜底。
                 });
+        sink.plane(UiTilt.UI);
         // 注意：不要再给每艘船单独 add 热区。它们会压在画布那块 drag 热区上面，
         // 把 mousePressed 吞掉 → pressAt 收不到 → 拖不动。选中在 pressAt 里做。
         if (boundFleet == null) {
@@ -369,44 +375,75 @@ public final class FleetArrangementScreen implements Screen {
     public void draw(CanvasBuffer buffer) {
         PixelArt art = buffer.art();
         art.fillRect(0, 0, 640, 360, Palette.BACKDROP);
+        // 棋盘嵌在台面里（最低一层，比面板斜得多），右边列表 + 顶栏 + 页脚整块浮起来。
+        // 浮起来的那一块是一层，所以列表和它的按钮之间不会越飘越开。
         drawCanvasFrame(art);
-        drawTopBar(buffer, art);
-        drawCanvas(buffer, art);
-        drawPanel(buffer, art);
+        buffer.beginLayer();
+        drawCanvas(buffer, buffer.art());
+        buffer.endLayer(UiTilt.BOARD, 0, 0, 640, 290);
+        // 棋子单独正着画：位置按棋盘透视算，像素不缩放
+        drawShips(buffer, art);
+        buffer.beginLayer();
+        drawPanel(buffer, buffer.art());
+        drawTopBar(buffer, buffer.art());
         drawFooter(buffer);
         drawStatus(buffer);
+        buffer.endLayer(UiTilt.UI, 0, 0, 640, 360);
     }
 
     private void drawCanvasFrame(PixelArt art) {
         int span = FleetBoard.SIZE * CELL;
-        art.rect(CANVAS_X - 6, CANVAS_Y - 6, span + 12, span + 12, Palette.PANEL);
-        art.frame(CANVAS_X - 6, CANVAS_Y - 6, span + 12, span + 12, Palette.LINE_FAINT);
-        art.rect(PANEL_X - 10, PANEL_Y - 10, PANEL_W + 16, 310, Palette.PANEL);
-        art.frame(PANEL_X - 10, PANEL_Y - 10, PANEL_W + 16, 310, Palette.LINE_FAINT);
+        // 棋盘视窗嵌在台面里（最低一层）
+        UiChrome.panelInset(art, CANVAS_X - 6, CANVAS_Y - 6, span + 12, span + 12);
+        // 框内侧的量程刻度：每 4 格一道，和格线对齐，空盘也像一块校准过的绘图台
+        for (int g = 4; g < FleetBoard.SIZE; g += 4) {
+            int gx = CANVAS_X + g * CELL;
+            int gy = CANVAS_Y + g * CELL;
+            art.vline(CANVAS_Y - 3, CANVAS_Y - 1, gx, Palette.STEEL_DIM);
+            art.hline(CANVAS_X - 3, CANVAS_X - 1, gy, Palette.STEEL_DIM);
+            art.vline(CANVAS_Y + span + 1, CANVAS_Y + span + 3, gx, Palette.STEEL_DIM);
+            art.hline(CANVAS_X + span + 1, CANVAS_X + span + 3, gy, Palette.STEEL_DIM);
+        }
+    }
+
+    /** 一行列表底：选中是实心琥珀条（配 INK 字），没选中是切角暗块。 */
+    private void row(PixelArt art, int x, int y, int w, int h, boolean on) {
+        if (on) {
+            UiChrome.chamferFill(art, x, y, w, h, 3, Palette.AMBER);
+            art.hline(x + 3, x + w - 4, y + 1, Palette.WARN);
+            art.hline(x + 3, x + w - 4, y + h - 2, Palette.AMBER_DIM);
+        } else {
+            UiChrome.chamferFill(art, x, y, w, h, 3, Palette.PANEL_ALT);
+            UiChrome.chamferFrame(art, x, y, w, h, 3, Palette.STEEL_FAINT);
+        }
     }
 
     private void drawTopBar(CanvasBuffer buffer, PixelArt art) {
-        // 一行排版：每一段都按实测字宽往后推，别再写死 x（换舰队名长度一变就压字）
+        // 功能名做成羊皮纸牌，后面按实测字宽往后推（换舰队名长度一变就压字）
         String title = forRun()
                 ? Language.t("战术休整 · 编队", "LULL · FLEET")
                 : Language.t("舰队编排", "FLEET LAYOUT");
-        zh(buffer, title, 8, 5, 14, Palette.CYAN);
+        int plateW = (int) Math.ceil(textWidth(title, 12)) + 18;
+        UiChrome.plate(buffer, art, 6, 3, plateW, 17, title);
+        UiChrome.latin(art, "FLEET LAYOUT", 640 - 8 - UiChrome.measureLatin("FLEET LAYOUT"),
+                7, Palette.STEEL_DIM);
+        art.hline(6, 633, 22, Palette.STEEL_FAINT);
+        double x = 6 + plateW + 12;
         if (forRun()) {
             zh(buffer, Language.t(fleet.size() + " 艘 · 摆好按「回战场」",
                             fleet.size() + " SHIPS · PRESS BACK TO BATTLE"),
-                    8 + textWidth(title, 14) + 22, 6, 12, Palette.LINE_DIM);
+                    x, 6, 12, Palette.LINE_DIM);
             return;
         }
-        double x = 8 + textWidth(title, 14) + 14;
-        zh(buffer, "<", (int) x, 6, 14, Palette.CYAN_DIM);
-        x += 14;
+        zh(buffer, "<", (int) x, 6, 12, Palette.AMBER_DIM);
+        x += 12;
         ShipCatalog.Starter starter = ShipCatalog.starter(fleetIndex);
-        zh(buffer, Language.t(starter.nameZh(), starter.nameEn()), x, 5, 12, Palette.LINE);
-        x += textWidth(Language.t(starter.nameZh(), starter.nameEn()), 12) + 10;
-        zh(buffer, ">", (int) x, 6, 14, Palette.CYAN_DIM);
-        x += 18;
+        zh(buffer, Language.t(starter.nameZh(), starter.nameEn()), x, 6, 12, Palette.LINE);
+        x += textWidth(Language.t(starter.nameZh(), starter.nameEn()), 12) + 8;
+        zh(buffer, ">", (int) x, 6, 12, Palette.AMBER_DIM);
+        x += 14;
         zh(buffer, Language.t(fleet.size() + " 艘 · 摆好按「确定」",
-                fleet.size() + " SHIPS · PRESS OK"), x, 6, 12, Palette.LINE_DIM);
+                fleet.size() + " SHIPS · PRESS OK"), x, 6, 12, Palette.LINE_FAINT);
     }
 
     private void drawCanvas(CanvasBuffer buffer, PixelArt art) {
@@ -422,13 +459,31 @@ public final class FleetArrangementScreen implements Screen {
                 }
             }
         }
-        // 船：按自己的外观图铺进去（和我方/敌方棋盘同一套画法）
+        // 船：不在这一层画（透视会把 16px 的船重采样），见 drawShips()
+        art.frame(CANVAS_X, CANVAS_Y, span, span, Palette.LINE_DIM);
+    }
+
+    /** 棋子的屏幕位置：位置走棋盘透视，像素不缩放，落点取投影后格子的中心。 */
+    private static int shipLeft(int cx, int cy, int wCells, int hCells) {
+        double left = UiTilt.BOARD.toX(CANVAS_X + cx * CELL, CANVAS_Y + cy * CELL);
+        double right = UiTilt.BOARD.toX(CANVAS_X + (cx + wCells) * CELL, CANVAS_Y + (cy + hCells) * CELL);
+        return (int) Math.round((left + right) / 2 - wCells * CELL / 2.0);
+    }
+
+    private static int shipTop(int cx, int cy, int wCells, int hCells) {
+        double top = UiTilt.BOARD.toY(CANVAS_X + cx * CELL, CANVAS_Y + cy * CELL);
+        double bottom = UiTilt.BOARD.toY(CANVAS_X + (cx + wCells) * CELL, CANVAS_Y + (cy + hCells) * CELL);
+        return (int) Math.round((top + bottom) / 2 - hCells * CELL / 2.0);
+    }
+
+    /** 棋子正着画：位置贴合棋盘透视，像素保持 1:1，不参与重采样。 */
+    private void drawShips(CanvasBuffer buffer, PixelArt art) {
         List<FleetUnit> units = fleet.units();
         for (int i = 0; i < units.size(); i++) {
             FleetUnit unit = units.get(i);
             AppearanceDesign look = ShipPainter.lookOf(unit.ship());
-            int x = CANVAS_X + unit.x() * CELL;
-            int y = CANVAS_Y + unit.y() * CELL;
+            int x = shipLeft(unit.x(), unit.y(), unit.w(), unit.h());
+            int y = shipTop(unit.x(), unit.y(), unit.w(), unit.h());
             if (look == null || look.isBlank()) {
                 ShipPainter.drawPlaceholder(art, unit.ship(), x, y, CELL, Palette.SHIP_SHADE);
             } else {
@@ -445,8 +500,8 @@ public final class FleetArrangementScreen implements Screen {
                 en(art, String.valueOf(i + 1), x + 1, y + 1, Palette.LINE);
             }
         }
-        art.frame(CANVAS_X, CANVAS_Y, span, span, Palette.LINE_DIM);
-        // 选中船的光环读数（生效范围已经在棋盘上用黄框画出）
+        // 选中船的光环读数（文字不透视，正着写在棋盘下沿外）
+        int span = FleetBoard.SIZE * CELL;
         if (selected >= 0 && selected < units.size()) {
             FleetUnit sel = units.get(selected);
             String perks = Perk.labelsOf(sel.ship().perks());
@@ -458,7 +513,7 @@ public final class FleetArrangementScreen implements Screen {
         }
     }
 
-    /** 把选中船的光环生效范围框出来：每艘被罩到的船描一圈黄框。 */
+    /** 把选中船的光环生效范围框出来：每艘被罩到的船描一圈黄框（边框跟着棋子走）。 */
     private void framePerkRange(PixelArt art, FleetUnit source) {
         for (FleetUnit other : fleet.units()) {
             if (other.id().equals(source.id())) {
@@ -472,14 +527,19 @@ public final class FleetArrangementScreen implements Screen {
                 }
             }
             if (covered) {
-                art.frame(CANVAS_X + other.x() * CELL - 1,
-                        CANVAS_Y + other.y() * CELL - 1,
-                        other.w() * CELL + 1, other.h() * CELL + 1, Palette.WARN);
+                int x = shipLeft(other.x(), other.y(), other.w(), other.h());
+                int y = shipTop(other.x(), other.y(), other.w(), other.h());
+                art.frame(x - 1, y - 1, other.w() * CELL + 1, other.h() * CELL + 1, Palette.WARN);
             }
         }
     }
 
     private void drawPanel(CanvasBuffer buffer, PixelArt art) {
+        // 右栏本体：整块浮在棋盘旁边（棋盘是嵌进台面的最低层，它是浮起来的最高层）
+        UiChrome.panel(art, PANEL_X - 10, PANEL_Y - 10, PANEL_W + 16, 310);
+        // 结构细节：右内缘一条竖向量程，列表读成一台编队终端
+        UiChrome.gaugeV(art, PANEL_X + PANEL_W - 4, PANEL_Y + 14, 268, 8, 32,
+                Palette.STEEL_FAINT);
         int y = FLEET_ROW_Y - 18;
         if (!forRun()) {
             zh(buffer, Language.t("舰队（[ ] 或点一行切换）", "FLEET ([ ] OR CLICK A ROW TO SWITCH)"),
@@ -490,14 +550,15 @@ public final class FleetArrangementScreen implements Screen {
             int rowY = FLEET_ROW_Y + i * ROW_H;
             boolean on = i == fleetIndex;
             if (on) {
-                art.rect(PANEL_X - 6, rowY - 3, PANEL_W - 14, ROW_H - 2, Palette.PANEL_ALT);
-                art.frame(PANEL_X - 6, rowY - 3, PANEL_W - 14, ROW_H - 2, Palette.CYAN_DIM);
+                row(art, PANEL_X - 6, rowY - 3, PANEL_W - 14, ROW_H - 2, true);
+            } else {
+                row(art, PANEL_X - 6, rowY - 3, PANEL_W - 14, ROW_H - 2, false);
             }
-            en(art, String.valueOf(i + 1), PANEL_X, rowY + 4, on ? Palette.CYAN : Palette.LINE_FAINT);
+            en(art, String.valueOf(i + 1), PANEL_X, rowY + 4, on ? Palette.INK : Palette.LINE_FAINT);
             zh(buffer, Language.t(starter.nameZh(), starter.nameEn()), PANEL_X + 14, rowY, 12,
-                    on ? Palette.LINE : Palette.LINE_DIM);
+                    on ? Palette.INK : Palette.LINE);
             zh(buffer, Language.t(starter.fleet().size() + " 艘", starter.fleet().size() + " SHIPS"),
-                    PANEL_X + 150, rowY, 12, Palette.LINE_FAINT);
+                    PANEL_X + 150, rowY, 12, on ? Palette.INK : Palette.LINE_FAINT);
         }
 
         // 船列表（关卡内没有上面的舰队列表，直接顶到面板开头）
@@ -513,18 +574,19 @@ public final class FleetArrangementScreen implements Screen {
             int rowY = listY + i * SHIP_ROW_H;
             boolean on = i == selected;
             if (on) {
-                art.rect(PANEL_X - 6, rowY - 3, PANEL_W - 14, SHIP_ROW_H - 1, Palette.PANEL_ALT);
-                art.frame(PANEL_X - 6, rowY - 3, PANEL_W - 14, SHIP_ROW_H - 1, Palette.CYAN_DIM);
+                row(art, PANEL_X - 6, rowY - 3, PANEL_W - 14, SHIP_ROW_H - 1, true);
+            } else {
+                row(art, PANEL_X - 6, rowY - 3, PANEL_W - 14, SHIP_ROW_H - 1, false);
             }
-            en(art, String.valueOf(i + 1), PANEL_X, rowY + 1, on ? Palette.CYAN : Palette.LINE_FAINT);
-            zh(buffer, unit.nameZh(), PANEL_X + 14, rowY - 2, 12, on ? Palette.LINE : Palette.LINE_DIM);
+            en(art, String.valueOf(i + 1), PANEL_X, rowY + 1, on ? Palette.INK : Palette.LINE_FAINT);
+            zh(buffer, unit.nameZh(), PANEL_X + 14, rowY - 2, 12, on ? Palette.INK : Palette.LINE);
             zh(buffer, Language.t(unit.w() + "×" + unit.h() + "  @" + unit.x() + ","
                                     + unit.y() + "  结构 " + unit.maxHp()
                                     + "  级" + unit.level(),
                             unit.w() + "x" + unit.h() + "  @" + unit.x() + ","
                                     + unit.y() + "  HP " + unit.maxHp()
                                     + "  Lv" + unit.level()),
-                    PANEL_X + 118, rowY - 2, 12, Palette.LINE_FAINT);
+                    PANEL_X + 118, rowY - 2, 12, on ? Palette.INK : Palette.LINE_FAINT);
         }
 
         // 合计与相邻加成（一行合计、一行加成：两者都要留在按钮上方）
@@ -588,11 +650,13 @@ public final class FleetArrangementScreen implements Screen {
 
     private void button(PixelArt art, CanvasBuffer buffer, int x, int y, int w, int h,
                         String label, com.hysx.salvosequence.core.Color color) {
-        art.polygon(new double[]{x, x + w, x + w - 6, x - 6},
-                new double[]{y, y, y + h, y + h}, Palette.PANEL_ALT);
-        art.polygonOutline(new double[]{x, x + w, x + w - 6, x - 6},
-                new double[]{y, y, y + h, y + h}, color);
-        zh(buffer, label, x + 8, y + 5, 12, color);
+        double[] bx = {x, x + w, x + w - 6, x - 6};
+        double[] by = {y, y, y + h, y + h};
+        art.polygon(bx, by, Palette.PANEL_ALT);
+        art.polygonOutline(bx, by, color);
+        art.polygonOutline(new double[]{x + 1, x + w - 1, x + w - 7, x - 5},
+                new double[]{y + 1, y + 1, y + h - 1, y + h - 1}, Palette.STEEL_FAINT);
+        zh(buffer, label, x + 9, y + 5, 12, color);
     }
 
     private void zh(CanvasBuffer buffer, String text, double x, double top, double size,

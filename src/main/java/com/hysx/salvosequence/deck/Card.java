@@ -36,10 +36,10 @@ public record Card(
         String textZh) {
 
     public Card {
-        if (id == null || id.isBlank()) {
+        if (id == null || id.trim().isEmpty()) {
             throw new IllegalArgumentException("卡牌必须有 id");
         }
-        if (nameZh == null || nameZh.isBlank() || nameEn == null || nameEn.isBlank()) {
+        if (nameZh == null || nameZh.trim().isEmpty() || nameEn == null || nameEn.trim().isEmpty()) {
             throw new IllegalArgumentException("卡牌 " + id + " 必须有中英文名");
         }
         if (kind == null) {

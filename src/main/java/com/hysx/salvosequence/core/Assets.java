@@ -73,7 +73,7 @@ public final class Assets {
             } catch (Exception ignored) {
                 // 沙箱/非常规类加载器：退回工作目录
             }
-            if (dir == null || dir.isBlank()) {
+            if (dir == null || dir.trim().isEmpty()) {
                 dir = System.getProperty("user.dir", ".");
             }
             baseDir = dir;

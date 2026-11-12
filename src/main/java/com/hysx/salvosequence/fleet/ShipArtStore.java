@@ -109,7 +109,7 @@ public final class ShipArtStore {
     public static Fleet parseFleet(String text, String id, String nameZh, String nameEn) {
         List<FleetUnit> units = new ArrayList<>();
         for (String raw : text.split("\\R")) {
-            String line = raw.strip();
+            String line = raw.trim();
             if (line.isEmpty() || line.startsWith("#") || line.startsWith("id ")
                     || line.startsWith("name ")) {
                 continue;
@@ -117,7 +117,7 @@ public final class ShipArtStore {
             if (!line.startsWith("ship ")) {
                 continue;
             }
-            String[] parts = line.substring(5).strip().split("\\s+");
+            String[] parts = line.substring(5).trim().split("\\s+");
             if (parts.length != 4) {
                 throw new IllegalArgumentException("编排行写法不对：" + line);
             }
@@ -322,7 +322,7 @@ public final class ShipArtStore {
 
     /** 文件名片段（{@code gun.main} → {@code gun.main}）。 */
     private static String fileName(String id) {
-        if (id == null || id.isBlank()) {
+        if (id == null || id.trim().isEmpty()) {
             throw new IllegalArgumentException("存档文件必须有名字");
         }
         StringBuilder sb = new StringBuilder();

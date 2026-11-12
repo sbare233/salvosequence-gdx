@@ -15,6 +15,11 @@ uniform float u_limb;      // 边缘变暗
 uniform float u_exposure;
 uniform float u_dbg;      // 调试：1=显示 cell，2=显示 gran
 
+uniform vec3 u_cool;      // 冷端色（米粒暗部）
+uniform vec3 u_mid;       // 中间调
+uniform vec3 u_hot;       // 最热处
+uniform vec3 u_limbTint;  // 边缘偏色（黄矮星偏橙、蓝巨星偏青）
+
 // ---------- 噪声 ----------
 vec3 hash33(vec3 p) {
     p = vec3(dot(p, vec3(127.1, 311.7, 74.7)),
@@ -99,10 +104,11 @@ void main() {
     float facula = smoothstep(thrS - 0.05, thrS + 0.02, sLow) * (1.0 - smoothstep(thrS + 0.02, thrS + 0.10, sLow));
 
     // ---------- 温度 → 颜色 ----------
+    // 三档色由 Java 侧按恒星类型传入：黄矮星偏暖、蓝巨星偏青白、红巨星偏橙红
     float heat = clamp(gran, 0.0, 1.0);
-    vec3 cCool = vec3(1.00, 0.80, 0.56);
-    vec3 cMid  = vec3(1.00, 0.97, 0.90);
-    vec3 cHot  = vec3(1.00, 1.00, 1.00);   // 最热的米粒直接到纯白
+    vec3 cCool = u_cool;
+    vec3 cMid  = u_mid;
+    vec3 cHot  = u_hot;
     vec3 col = mix(cCool, cMid, smoothstep(0.10, 0.90, heat));
     col = mix(col, cHot, smoothstep(0.80, 1.05, heat));
     col *= spotDim;
@@ -121,7 +127,7 @@ void main() {
     float mu = clamp(dot(worldNormal, viewDir), 0.0, 1.0);
     float ld = 1.0 - u_limb * (1.0 - pow(mu, 0.55));
     col *= ld;
-    col = mix(col, col * vec3(1.00, 0.72, 0.50), (1.0 - mu) * 0.25);
+    col = mix(col, col * u_limbTint, (1.0 - mu) * 0.25);
 
     col = pow(max(col, vec3(0.0)), vec3(1.18));   // 压暗中间调，只让最热的米粒顶到纯白
     vec3 outCol = col * u_exposure;

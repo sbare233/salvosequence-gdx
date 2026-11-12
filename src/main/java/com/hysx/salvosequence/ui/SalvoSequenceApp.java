@@ -66,7 +66,7 @@ public class SalvoSequenceApp {
 
         // 只想听战斗曲时用：-Dsalvosequence.music=battle（正式流程是进战斗界面才切）
         String wantMusic = System.getProperty("salvosequence.music");
-        if (wantMusic != null && !wantMusic.isBlank()) {
+        if (wantMusic != null && !wantMusic.trim().isEmpty()) {
             new Thread(() -> {
                 try {
                     Thread.sleep(1500);

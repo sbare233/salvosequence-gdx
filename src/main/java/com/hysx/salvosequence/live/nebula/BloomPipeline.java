@@ -82,6 +82,11 @@ public final class BloomPipeline {
 
         Gdx.gl.glClearColor(0f, 0f, 0f, 1f);
         Gdx.gl.glClear(GL20.GL_COLOR_BUFFER_BIT);
+        // 合成这一步画在调用方绑定的 FBO 上（NebulaLive 里是 320×180 的 out）。上面
+        // a.end() 会把视口恢复成窗口尺寸，窗口不是 320×180 时四边形就按窗口比例画进
+        // 小缓冲——只落进一角，整帧发暗、糊成放大的局部。注意视口要用全分辨率尺寸
+        // （width/height），不是 a/b 的四分之一尺寸。
+        Gdx.gl.glViewport(0, 0, width, height);
         composite.bind();
         composite.setUniformi("u_scene", 0);
         composite.setUniformi("u_bloom", 1);

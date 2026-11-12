@@ -83,6 +83,16 @@ public class Corona {
 
     public void render(com.badlogic.gdx.graphics.Camera cam, float time, float prom, float exposure,
                        float tanHalf, float aspect, Vector3 seed) {
+        render(cam, time, prom, exposure, tanHalf, aspect, seed, 1.0f, 1.0f, 1.0f);
+    }
+
+    /**
+     * @param tintR/G/B 光谱着色：暖橙色的日冕整体乘这个系数
+     *                  （蓝巨星拉冷、红巨星加深），不传就是原色。
+     */
+    public void render(com.badlogic.gdx.graphics.Camera cam, float time, float prom, float exposure,
+                       float tanHalf, float aspect, Vector3 seed,
+                       float tintR, float tintG, float tintB) {
         shader.begin();
         shader.setUniform3fv("u_arcA", arcA, 0, ARCS * 3);
         shader.setUniform3fv("u_arcB", arcB, 0, ARCS * 3);
@@ -102,6 +112,7 @@ public class Corona {
         shader.setUniform3fv("u_seed", new float[]{seed.x, seed.y, seed.z}, 0, 3);
         shader.setUniformf("u_prom", prom);
         shader.setUniformf("u_exposure", exposure);
+        shader.setUniformf("u_tint", tintR, tintG, tintB);
 
         // 放到远平面 + 开深度测试：恒星实心球（和光球外壳）已经写好深度，
         // 这一趟在盘面内会被整段挡掉，包括跑到背面去的日珥弧

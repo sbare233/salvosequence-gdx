@@ -119,7 +119,8 @@ class CardLoopScreenTest {
         CanvasBuffer buffer = newBuffer();
         screen.draw(buffer);
         assertTrue(mentions(buffer.texts(), "航程"), "顶栏要有航程读数");
-        assertTrue(mentions(buffer.texts(), "结束回合"), "要有结束回合按钮");
+        // 新版战斗界面把「结束回合」做成左下角的三角按钮（标签只有「跳」）
+        assertTrue(mentions(buffer.texts(), "跳"), "要有跳过回合的三角按钮");
     }
 
     /**
@@ -166,8 +167,11 @@ class CardLoopScreenTest {
 
         CanvasBuffer buffer = newBuffer();
         screen.draw(buffer);
-        assertTrue(mentions(buffer.texts(), "我方舰队 16×16"), "左边那块图注是我方舰队");
-        assertTrue(mentions(buffer.texts(), "敌方舰队 16×16"), "右边那块图注是敌方舰队");
+        // 新版版面（参考图）去掉了棋盘上的「我方舰队 16×16」图注，
+        // 两块盘面靠位置区分：左边一块起点 126、右边一块 383
+        int[] geometry = screen.debugGridGeometry();
+        assertEquals(126, geometry[0], "我方棋盘在 x=126");
+        assertEquals(383, screen.debugEnemyBoardX(), "敌方棋盘在 x=383");
         assertFalse(mentions(buffer.texts(), "模块"), "模块面板已经没有了");
     }
 

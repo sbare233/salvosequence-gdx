@@ -12,7 +12,7 @@ public final class Params {
 
     // ---- Noise (add-on "Noise" panel: Overall Noise / Scale Variation / Distortion Variation) ----
     /** Overall FBM scale (Blender drives this from a second noise, we expose it directly). */
-    public float noiseScale = 1.0f;
+    public float noiseScale = 1.8f;
     /** Blender Noise Texture Detail = 16 (we map 0..1 -> 3..7 octaves). */
     public float noiseDetail = 0.86f;
     /** Blender Noise Texture Roughness = 0.5743. */
@@ -86,6 +86,8 @@ public final class Params {
     public float fov = 78f;
     public boolean starsEnabled = true;
     public boolean bloomEnabled = true;
+    /** 机位水平自转速度（度/秒）：相机绕星云缓慢转头，战斗底图就不会是一张死图；0 = 固定机位。 */
+    public float autoOrbit = 0.12f;
 
     public Params copy() {
         Params p = new Params();
@@ -130,6 +132,7 @@ public final class Params {
         p.fov = fov;
         p.starsEnabled = starsEnabled;
         p.bloomEnabled = bloomEnabled;
+        p.autoOrbit = autoOrbit;
         return p;
     }
 

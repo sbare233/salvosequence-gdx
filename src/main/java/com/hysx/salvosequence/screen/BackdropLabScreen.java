@@ -94,6 +94,9 @@ public final class BackdropLabScreen implements Screen {
             ensurePlanet();
         }
         rescan();
+        // 工坊是"把机位停在某个角度看清楚"的地方：关掉星云的自动水平漂移，
+        // 否则时间一直在走，刚拖到的角度几秒后又被带走，看起来像拖不动。
+        com.hysx.salvosequence.live.LiveBackdrops.setDriftEnabled(false);
     }
 
     @Override
@@ -298,8 +301,7 @@ public final class BackdropLabScreen implements Screen {
                 }
             }
             case "L" -> {
-                liveIndex = com.hysx.salvosequence.live.LiveBackdrops.cycle(1);
-                com.hysx.salvosequence.live.LiveBackdrops.setSelected(liveIndex);
+                liveIndex = com.hysx.salvosequence.live.LiveBackdrops.cyclePreview(liveIndex, 1);
                 if (liveIndex >= 0) {
                     planetMode = false;
                 }
@@ -475,8 +477,7 @@ public final class BackdropLabScreen implements Screen {
         sink.add(4, 20, 118, 16, () -> setPlanetMode(!planetMode));
         // 实时背景按钮：和 L 键同一条路
         sink.add(128, 20, 150, 16, () -> {
-            liveIndex = com.hysx.salvosequence.live.LiveBackdrops.cycle(1);
-            com.hysx.salvosequence.live.LiveBackdrops.setSelected(liveIndex);
+            liveIndex = com.hysx.salvosequence.live.LiveBackdrops.cyclePreview(liveIndex, 1);
             if (liveIndex >= 0) {
                 planetMode = false;
             }
@@ -653,6 +654,8 @@ public final class BackdropLabScreen implements Screen {
 
     @Override
     public void onExit() {
+        // 离开工坊恢复自动漂移，战斗里的星云才是活的
+        com.hysx.salvosequence.live.LiveBackdrops.setDriftEnabled(true);
         if (planet != null) {
             planet.dispose();
             planet = null;
@@ -703,9 +706,9 @@ public final class BackdropLabScreen implements Screen {
             if (row == 0) {
                 cam[0] += dir * 5;
             } else if (row == 1) {
-                cam[1] = Math.max(-80, Math.min(80, cam[1] + dir * 3));
+                cam[1] = Math.max(-88, Math.min(88, cam[1] + dir * 3));
             } else {
-                cam[2] = Math.max(0.45, Math.min(40, cam[2] * (dir > 0 ? 0.92 : 1.087)));
+                cam[2] = Math.max(0.45, Math.min(3.50, cam[2] * (dir > 0 ? 0.92 : 1.087)));
             }
             LiveBackdrops.setCamera(liveIndex, cam[0], cam[1], cam[2]);
         } else {

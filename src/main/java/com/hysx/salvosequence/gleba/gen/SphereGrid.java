@@ -86,51 +86,99 @@ public final class SphereGrid {
             lonDeg[i] = (float) Math.toDegrees(Math.atan2(pz[i], px[i]));
         }
 
-        // ---- 邻接（按角距，自适应局部畸变）----
-        List<List<Integer>> adj = new ArrayList<>(tiles);
-        for (int i = 0; i < tiles; i++) adj.add(new ArrayList<>(8));
-        float searchRadius = tileAngle * 2.2f;
-        for (int i = 0; i < tiles; i++) {
-            int[] cand = queryRadius(px[i], py[i], pz[i], searchRadius);
-            float[] ang = new float[cand.length];
-            for (int k = 0; k < cand.length; k++) {
-                ang[k] = (float) Math.acos(clamp(dot(px[i], py[i], pz[i], px[cand[k]], py[cand[k]], pz[cand[k]]), -1, 1));
-            }
-            // 按角距排序（候选很少，插入排序足够）
-            for (int a = 1; a < cand.length; a++) {
-                int cv = cand[a];
-                float ca = ang[a];
-                int b = a - 1;
-                while (b >= 0 && ang[b] > ca) { cand[b + 1] = cand[b]; ang[b + 1] = ang[b]; b--; }
-                cand[b + 1] = cv;
-                ang[b + 1] = ca;
-            }
-            float nearest = Float.MAX_VALUE;
-            for (int k = 0; k < cand.length; k++) {
-                if (cand[k] != i && ang[k] > 1e-7f) { nearest = ang[k]; break; }
-            }
-            if (nearest == Float.MAX_VALUE) continue;
-            int taken = 0;
-            for (int k = 0; k < cand.length && taken < 8; k++) {
-                if (cand[k] == i) continue;
-                if (ang[k] > nearest * 1.62f) break;
-                adj.get(i).add(cand[k]);
-                taken++;
+        // ---- 邻接 ----
+        // 面内格直接按下标连（±1 / ±res 和四个对角），只有落在立方体面边缘的格
+        // 才退回空间哈希按角距找邻。原来的写法 13 万格逐格查哈希 + 装箱列表，
+        // 光建邻接就要 1.2 秒；现在边界格只占 2.7%，整段降到几十毫秒。
+        final int cap = 12;
+        int[] adjBuf = new int[tiles * cap];
+        int[] adjCount = new int[tiles];
+        int res = faceRes;
+        for (int f = 0; f < 6; f++) {
+            int base = f * res * res;
+            for (int j = 1; j < res - 1; j++) {
+                for (int i = 1; i < res - 1; i++) {
+                    int tc = base + j * res + i;
+                    addLink(adjBuf, adjCount, cap, tc, tc - 1);
+                    addLink(adjBuf, adjCount, cap, tc, tc + 1);
+                    addLink(adjBuf, adjCount, cap, tc, tc - res);
+                    addLink(adjBuf, adjCount, cap, tc, tc + res);
+                    addLink(adjBuf, adjCount, cap, tc, tc - res - 1);
+                    addLink(adjBuf, adjCount, cap, tc, tc - res + 1);
+                    addLink(adjBuf, adjCount, cap, tc, tc + res - 1);
+                    addLink(adjBuf, adjCount, cap, tc, tc + res + 1);
+                }
             }
         }
-        // 对称化
-        for (int i = 0; i < tiles; i++) {
-            for (int nb : adj.get(i)) {
-                if (!adj.get(nb).contains(i)) adj.get(nb).add(i);
+        // 边界格：角距最近邻，保证跨面接缝也是连通的
+        float searchRadius = tileAngle * 2.2f;
+        for (int f = 0; f < 6; f++) {
+            int base = f * res * res;
+            for (int j = 0; j < res; j++) {
+                for (int i = 0; i < res; i++) {
+                    if (i > 0 && i < res - 1 && j > 0 && j < res - 1) continue;
+                    int tv = base + j * res + i;
+                    int[] cand = queryRadius(px[tv], py[tv], pz[tv], searchRadius);
+                    float[] ang = new float[cand.length];
+                    for (int k = 0; k < cand.length; k++) {
+                        ang[k] = (float) Math.acos(clamp(dot(px[tv], py[tv], pz[tv],
+                                px[cand[k]], py[cand[k]], pz[cand[k]]), -1, 1));
+                    }
+                    // 候选很少（十几），插入排序足够
+                    for (int a = 1; a < cand.length; a++) {
+                        int cv = cand[a];
+                        float ca = ang[a];
+                        int b = a - 1;
+                        while (b >= 0 && ang[b] > ca) {
+                            cand[b + 1] = cand[b];
+                            ang[b + 1] = ang[b];
+                            b--;
+                        }
+                        cand[b + 1] = cv;
+                        ang[b + 1] = ca;
+                    }
+                    float nearest = Float.MAX_VALUE;
+                    for (int k = 0; k < cand.length; k++) {
+                        if (cand[k] != tv && ang[k] > 1e-7f) {
+                            nearest = ang[k];
+                            break;
+                        }
+                    }
+                    if (nearest == Float.MAX_VALUE) continue;
+                    int taken = 0;
+                    for (int k = 0; k < cand.length && taken < 8; k++) {
+                        if (cand[k] == tv) continue;
+                        if (ang[k] > nearest * 1.62f) break;
+                        addLink(adjBuf, adjCount, cap, tv, cand[k]);
+                        taken++;
+                    }
+                }
             }
         }
         nbStart = new int[tiles + 1];
-        for (int i = 0; i < tiles; i++) nbStart[i + 1] = nbStart[i] + adj.get(i).size();
+        for (int i = 0; i < tiles; i++) nbStart[i + 1] = nbStart[i] + adjCount[i];
         nbList = new int[nbStart[tiles]];
         for (int i = 0; i < tiles; i++) {
-            List<Integer> l = adj.get(i);
-            for (int k = 0; k < l.size(); k++) nbList[nbStart[i] + k] = l.get(k);
+            System.arraycopy(adjBuf, i * cap, nbList, nbStart[i], adjCount[i]);
         }
+    }
+
+    /** 双向连边（去重、容量封顶）。 */
+    private void addLink(int[] buf, int[] count, int cap, int a, int b) {
+        if (a == b || a < 0 || b < 0 || a >= tiles || b >= tiles) return;
+        linkOne(buf, count, cap, a, b);
+        linkOne(buf, count, cap, b, a);
+    }
+
+    private void linkOne(int[] buf, int[] count, int cap, int a, int b) {
+        int base = a * cap;
+        int n = count[a];
+        for (int k = 0; k < n; k++) {
+            if (buf[base + k] == b) return;
+        }
+        if (n >= cap) return;
+        buf[base + n] = b;
+        count[a] = n + 1;
     }
 
     public int degree(int t) { return nbStart[t + 1] - nbStart[t]; }

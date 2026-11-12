@@ -53,6 +53,25 @@ final class ShipPainter {
     }
 
     /**
+     * 这艘船在棋盘上<b>实际画出来</b>的像素宽（外观图自己的格数 × 格宽）。
+     *
+     * <p>棋子的占格（{@code FleetUnit.w()}）和外观图尺寸不一定相等——船体常常画得比
+     * 占格宽。锁定框、选中框这类要贴住船体的东西必须用这里的像素尺寸，不然会按占格
+     * 去居中，框就偏到船的一侧。</p>
+     */
+    static int drawnWidth(AppearanceDesign look, int cellPx) {
+        return spanOf(look, cellPx);
+    }
+
+    /** 同 {@link #drawnWidth}，纵向。 */
+    static int drawnHeight(AppearanceDesign look, int cellPx) {
+        if (look == null) {
+            return 0;
+        }
+        return (look.height() / AppearanceDesign.CELL) * cellPx;
+    }
+
+    /**
      * 画一艘船。
      *
      * @param look   外观图

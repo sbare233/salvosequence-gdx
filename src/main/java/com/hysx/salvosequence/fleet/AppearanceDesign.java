@@ -49,7 +49,7 @@ public final class AppearanceDesign {
     private final int fps;
 
     private AppearanceDesign(String shipId, String nameZh, int w, int h, List<int[]> frames, int fps) {
-        if (shipId == null || shipId.isBlank()) {
+        if (shipId == null || shipId.trim().isEmpty()) {
             throw new IllegalArgumentException("外观图必须绑在某种船上");
         }
         if (w <= 0 || h <= 0) {
@@ -369,7 +369,7 @@ public final class AppearanceDesign {
      * @throws IllegalArgumentException 文件坏了或尺寸对不上
      */
     public static AppearanceDesign parse(String text, Ship ship) {
-        if (text == null || text.isBlank()) {
+        if (text == null || text.trim().isEmpty()) {
             throw new IllegalArgumentException("外观图是空的");
         }
         String[] lines = text.split("\\R");
@@ -384,7 +384,7 @@ public final class AppearanceDesign {
         int[] current = null;
         int row = 0;
         for (int i = 0; i < lines.length; i++) {
-            String line = lines[i].strip();
+            String line = lines[i].trim();
             if (line.isEmpty()) {
                 continue;
             }
@@ -392,15 +392,15 @@ public final class AppearanceDesign {
                 continue;
             }
             if (line.startsWith("ship ")) {
-                shipId = line.substring(5).strip();
+                shipId = line.substring(5).trim();
                 continue;
             }
             if (line.startsWith("name ")) {
-                nameZh = line.substring(5).strip();
+                nameZh = line.substring(5).trim();
                 continue;
             }
             if (line.startsWith("size ")) {
-                String[] parts = line.substring(5).strip().split("x");
+                String[] parts = line.substring(5).trim().split("x");
                 if (parts.length != 2) {
                     throw new IllegalArgumentException("第 " + (i + 1) + " 行 size 写法不对：" + line);
                 }
@@ -409,7 +409,7 @@ public final class AppearanceDesign {
                 continue;
             }
             if (line.startsWith("fps ")) {
-                fps = parsePositive(line.substring(4).strip(), i + 1);
+                fps = parsePositive(line.substring(4).trim(), i + 1);
                 continue;
             }
             if (line.startsWith("frame ")) {
@@ -453,7 +453,7 @@ public final class AppearanceDesign {
 
     private static int parsePositive(String raw, int lineNo) {
         try {
-            int v = Integer.parseInt(raw.strip());
+            int v = Integer.parseInt(raw.trim());
             if (v <= 0) {
                 throw new IllegalArgumentException("第 " + lineNo + " 行的数必须为正：" + raw);
             }

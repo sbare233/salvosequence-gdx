@@ -38,13 +38,13 @@ public record Ship(String id, String nameZh, String nameEn, ShipRole role, int w
                    List<String> cardIds, List<Perk> perks, int tier, String textZh) {
 
     public Ship {
-        if (id == null || id.isBlank()) {
+        if (id == null || id.trim().isEmpty()) {
             throw new IllegalArgumentException("船必须有 id");
         }
-        if (nameZh == null || nameZh.isBlank()) {
+        if (nameZh == null || nameZh.trim().isEmpty()) {
             throw new IllegalArgumentException("船 " + id + " 缺中文名");
         }
-        if (nameEn == null || nameEn.isBlank()) {
+        if (nameEn == null || nameEn.trim().isEmpty()) {
             throw new IllegalArgumentException("船 " + id + " 缺英文名");
         }
         if (role == null) {

@@ -12,6 +12,7 @@ java -jar target/SalvoSequenceGdx.jar
 ```
 
 常用按键：`F11` 切全屏 · `Ctrl+W` 回 1280x720 窗口 · `Ctrl+Q` 退出 · `C` 直达组舰者 · `F1` 调试 · `F4` 素材实验室。
+战斗中：`F2` 逐条翻 52 个背景机位（星云/恒星/星球/脉冲星/黑洞 × 近/中/远构图，临时覆盖本场随机结果） · `F3` 循环星球类型。
 
 系统属性：`-Dsalvosequence.windowed=true` 窗口启动；`-Dsalvosequence.music=battle` 试听战斗曲；
 `-Dcard.seed=20240601` 固定种子。
@@ -59,14 +60,50 @@ AGP 的 core library desugaring），所以 Android 8.0 以上都能装；`java.
 
 辉光观感在 `ui/PixelGameView` 顶部的 `BLOOM_THRESHOLD / BLOOM_BLUR_PASSES / BLOOM_BLUR_AMOUNT / BLOOM_INTENSITY / BLOOM_BASE_INTENSITY` 常量里调。
 
-CRT 扫描线（每个设计像素压暗下半像素，周期跟随整数倍缩放）可通过设置面板的「扫描线时机」选择：
+### 输入预压（模糊/辉光/孔径格栅）
+
+后处理会把亮部摊开，直接吃原画容易糊成一片白。所以 `PixelGameView.drawFrame` 在上屏前先调一次输入：
+
+| 条件 | 亮度 | 对比 |
+|---|---|---|
+| 风格 = 模糊 / 辉光 | ×0.8 | ×0.9 |
+| 再叠孔径格栅 | 再 ×0.9 | — |
+
+三个系数都在 `drawFrame` 上方的 `EFFECT_BRIGHTNESS / EFFECT_CONTRAST / GRILLE_BRIGHTNESS` 常量里。
+实现塞在原来补格栅亮度的 `beamShader` 里（contrast → brightness → 束流软膝），不额外多一次全屏 pass。
+辉光模式下 `drawFrame` 会被调用两次（屏幕铺底 + 输入捕获），两次都走同一套预压。
+
+### 实时 3D 背景的像素化：拜耳 / 像素滤镜
+
+设置面板的「背景滤镜」切换 `VideoSettings.backdropFilter`，`live/LiveBackdrops.post()` 里二选一：
+
+| 滤镜 | 实现 | 观感 |
+|---|---|---|
+| 拜耳（默认） | `core/BayerPixelator.quantizeInPlace`（同尺寸版，8×8 网点） | 网点细密、保留星云的柔和过渡 |
+| 像素 | `core/PixelArtFilter`（译自 Godot `PixelArt.gdshader`） | 亮度分档 + Sobel 描边，块面硬、边缘有描边 |
+
+背景工坊里 `K` 切这两种滤镜、`J` 切像素滤镜的调色板（原色/暖/冷/灰）。
+
+CRT 扫描线有三个设置项：**开关**、**形状**、**时机**（`VideoSettings.scanlines / scanlineShape / scanlineOrder`）。
+
+| 形状 | 观感 |
+|---|---|
+| 直条 | 一整条贯穿整行的黑条，规整、最像"信号层面的行消隐" |
+| 锯齿（默认） | 锯齿只落在**单个设计像素内部**：一个设计像素恰好由红/绿/蓝三条荧光条组成，绿条的黑线整体比红/蓝低 1 个设备像素，于是红蓝变暗的那一行里绿条仍然亮着，看起来像绿点从扫描线里戳出来 |
 
 | 时机 | 观感 |
 |---|---|
-| 特效后（默认） | 线条画在风格化结果之上，最锐利，辉光的亮部也会被压暗 |
-| 特效前 | 线条先于风格化生效；辉光会把线条一起晕开、发亮，更接近老电视 |
+| 特效后 | 线条画在风格化结果之上，最锐利，辉光的亮部也会被压暗 |
+| 特效前（默认） | 线条先于风格化生效；辉光会把线条一起晕开、发亮，更接近老电视 |
 
 「特效前 + 辉光」时扫描线画进 gdx-vfx 的输入捕获再一起做辉光，避免同一道线在屏幕上被压暗两次。
+
+**整数倍缩放要单独对齐**（`PixelGameView.drawScanlines`）：一个设计像素铺满 `px` 个设备像素，
+黑条高度必须取整（`px=2 → 1`、`px=3 → 1`、`px=4 → 2`）。以前按 `period*0.5` 算，1080p 下
+得到 1.5 像素高的线，会被硬件插值摊成两行半透明的灰，画面上就是深浅不一的横纹。
+条宽同理：孔径格栅的栅距取 `max(1, round(px/3))`，让"一个三色组 ≈ 一个设计像素"的比例在
+2×/3×/4× 屏幕上都成立。黑条透明度从 0.75 放到 0.5——显像管的行间隙只是"这一行没被扫到"，
+不是一层黑纱。
 
 ## 触摸操作（安卓）
 
@@ -82,6 +119,32 @@ CRT 扫描线（每个设计像素压暗下半像素，周期跟随整数倍缩�
 判定细节：轻点<b>不会</b>弹出悬浮说明（触摸屏没有悬停，说明只由长按触发，松手即收回）；
 长按在手指移动超出 8 设计像素后取消（转成拖动）；第二根手指落下时，单指那次按下会被作废，
 避免缩放时误触按钮；捏合结束后的残余手指拖动会被吞掉，不会把星图带着跑。
+
+### 节点框的颜色
+
+节点外框不写死颜色，而是取这颗星在**星盘 0° 与 90° 两个正交姿态下**脚下背景的平均亮度
+（各取 3x3 均值，避拜耳网点）：平均亮度 > 128 用**纯黑框**，否则用**纯白框**。
+取两个姿态是为了让颜色与当前旋转角无关——只按当前帧取色，节点掠过亮度阈值会黑白来回跳；
+只用第一次的取色，转半圈后又可能糊进背景。0°/90° 平均既不会闪，也不至于转过去就看不见。
+阈值是 `CardLoopScreen.FRAME_BLACK_ABOVE_LUM`（128），结果按节点 id 缓存，
+实现在 `CardLoopScreen.nodeFrameColor(...)` / `backdropLuminance(...)`。
+
+## 战斗波次与战术休整
+
+一个战斗节点不再是"一场打完就走"，改成 **3 波连打**：
+
+- 第 1/2/3 波的敌舰上限是 **3 / 4 / 6 艘**，目标战力是我方战力的 **35% / 50% / 70%**（再乘节点系数：
+  普通 0.85、精英 1.0、最终旗舰 1.35）。所以第一波真的只有几艘侦察舰，越往后越多越硬。
+- 打空一波就进 **战术休整**（`Run.Stage.LULL`）：界面**不另起一页**，而是像太空港那样把中间一块
+  （`PORT_PANEL_X=122` 起、宽 256）换成休整面板，**自己的舰队挪到最右**（`PORT_BOARD_X=382`，256 宽），
+  可以直接把船拖来拖去变阵。
+- 面板里是「牌库」列表：**点一行**就把这张牌在本节点禁掉（下一波洗牌不抽它），**空格**出发打下一波。
+  键盘也能用：上下选行、回车禁牌、空格出发。
+- 禁牌**只在本节点生效**：`Run.bannedCards` 进节点时清空，`Battle` 构造时接收 `Set<String>`，`drawPile` 过滤掉。
+- 打完第 3 波才走原来的节点结算（战利品 / 太空港 / 星图）。
+
+参数在 `Run` 里：`WAVES_PER_NODE`、`WAVE_POWER`、`WAVE_SHIPS`；敌方编队生成走
+`EnemyCatalog.squadForPower(..., maxShips)`，数量下限跟着本波上限走（不会强行凑 6 艘）。
 
 ## 星图（mapback/）
 
@@ -128,14 +191,53 @@ Android/data/com.hysx.salvosequence/files/backdrops/custom/
 | 操作 | 行为 |
 |---|---|
 | `←` / `→` | 换图 |
-| `Q/A` `W/S` `E/D` `R/F` `T/G` `Y/H` `B` | 像素块 / 色阶 / 抖动 / 亮度 / 对比 / 饱和 / 深空化 |
+| `K` | 切背景滤镜：拜耳 / 像素（和设置面板里的「背景滤镜」是同一个值） |
+| `J` | 像素滤镜的调色板：原色 / 暖色 / 冷色 / 灰阶 |
+| `Q/A` `W/S` `E/D` `R/F` `T/G` `Y/H` `B` | 拜耳模式：像素块 / 色阶 / 抖动 / 亮度 / 对比 / 饱和 / 深空化；像素模式：色阶 / 锐化 / 抖动 / 描边 / 阈值（后两项 `Y/H`、`B` 只对拜耳有效） |
 | `ENTER` | 导出当前这张到 `backdrops/custom/`（游戏会当自定义主题自动轮播） |
 | `P`（或参数面板下方的「批量导出整个文件夹」按钮） | 按当前参数把 `backdrops-src/` 里所有图各处理一张，写进新文件夹 `backdrops/batch/<yyyyMMdd-HHmmss>/` |
+| `L`（或左上第二个按钮） | 切实时 3D 背景：星云 / 恒星 / 星球 / 脉冲星 / 关（见下节） |
 
-批量导出每次新建一个时间戳文件夹，旧批次不会被覆盖；文件名带参数（`原名-x像素块-l色阶.png`），
-同名源图（如 `a.png` 与 `a.jpg`）会自动加 `-2` 后缀。单张读图失败只跳过并在结果里计数，
+工坊的静态预览、`ENTER` 导出、`P` 批量导出都跟着 `K` 选的滤镜走（`core/BackdropFiltering`
+统一分流：拜耳走 `BayerPixelator`，像素走 `PixelArtFilter` 先面积平均 cover 到 640×360 再过滤），
+右侧参数面板会换成对应那套参数。实时 3D 背景同样吃这个设置（见「实时 3D 背景的像素化」）。
+
+实时 3D 预览的操作：**拖动画面**转偏航/俯仰，**滚轮**调远近，**点右侧参数行**直接增减（右半 +、左半 −；点行首标题翻页），`-` / `=` 也行（`↑`/`↓` 选行）。整屏拖拽热区只在实时预览打开（`L`）时登记，开关一变热区会重建。
+
+批量导出每次新建一个时间戳文件夹，旧批次不会被覆盖；文件名带参数（拜耳 `原名-x像素块-l色阶.png`，
+像素 `原名-px-s色阶.png`），同名源图（如 `a.png` 与 `a.jpg`）会自动加 `-2` 后缀。单张读图失败只跳过并在结果里计数，
 不影响其余图片。`backdrops/batch/` 不会被游戏自动加载——挑好的再拷进 `backdrops/custom/`。
 星球模式（3D 行星实时渲染）没有批量导出：批量只处理 `backdrops-src/` 里的静态图。
+
+## 实时 3D 背景（live/）
+
+战斗和太空港的底图现在直接吃实时渲染的 3D 场景，不再是纯程序化星云。
+场景在 `src/main/java/com/hysx/salvosequence/live/`，每个场景渲进 320×180 的帧缓冲、
+读回 ARGB 再 2× 放大贴到 640×360 画布上（像素对齐，不插值）：
+
+| 场景 | 来源 | 说明 |
+|---|---|---|
+| `nebula` | 星云体积光 MVP | 橙红体积云 + 星点，相机不动；一帧约 2.3 ms |
+| `star` | 恒星 MVP | 颗粒感太阳，压在右上角；一帧约 1.1 ms |
+| `gleba` | 游戏自带的行星 | 复用 `GlebaPlanet`，生成期间返回 null、退回程序化背景 |
+| `pulsar` | 脉冲星 MVP | 中子星 + 磁极喷流 + 磁力线，落在右上角；一帧约 1.6 ms |
+
+- 选哪个：战斗节点按 `节点号 + 访问次数` 确定性挑一个（同一个节点每次进都一样）；
+  工坊里按 `L` 手动切（`LiveBackdrops.setSelected`），手动选中后战斗一律用它。
+- 压暗：实时底图会盖在棋盘和文字下面，所以按场景压暗——星云/星球留 70%，
+  恒星 32%、脉冲星 30%（这两个有大片高光）。
+- 刷新：每 15 fps 重渲一帧，其余帧复用缓存（省下来的一半时间给软件画布）。
+- **相机不再自动转**：早期版本让相机随时间缓慢环绕，现在相机只由「指针拖拽旋转 / 滚轮缩放 /
+  存档里的角度」决定，所以同一场景在战斗里是静止的，不会自己漂移。
+- 调参：背景工坊右侧「实时参数」面板，第 0 页是 `偏航 / 俯仰 / 距离`，往后每页 6 个场景参数
+  （点标题翻页、点行选中、再点同一行右半 `+` 左半 `-`，键盘 `↑↓` 选行、`-`/`=` 调值）。
+  改完停手 0.4 秒自动存到 `live-params.conf`（`LiveSettings`，桌面在工作目录、安卓在
+  `Android/data/com.hysx.salvosequence/files/`），启动时 `PixelGameView.create()` 读回。
+- 兜底：GL 初始化失败、着色器编译不过（安卓驱动差异）或行星还在生成时会返回 null，
+  `CardLoopScreen.drawBackdrop` 自动退回原来的程序化主题背景。
+
+四个场景（左上星云、右上恒星、左下星球、右下脉冲星）与战斗里的样子：
+`docs/live-scenes.png`、`docs/live-battle.png`。
 
 ## 性能（实测）
 
@@ -151,7 +253,11 @@ Android/data/com.hysx.salvosequence/files/backdrops/custom/
 
 提升来自四处：底色/尘埃带只在需要时扫（三角函数改查表 + 和角公式）、`ditherRect` 按步长跳写、
 桌面端用 `GL_BGRA` 直接灌 `IntBuffer` 上传、辉光链固定跑 640×360 再一次性放大。
-星盘换帧的 PNG 解码挪到后台线程并预取邻近档（每帧取帧 ≈0.03ms），快速拖动不再卡。
+星盘换帧的 PNG 解码挪到后台线程（每帧取帧 ≈0.03ms），快速拖动不再卡。解码队列是
+**"永远只解最新目标"**：拖动时目标角度每帧都在跳，排一堆旧帧只会把最新那帧堵在后面
+（画面先停住、等新帧出来再猛跳到目标角度，看上去就是"突变"）；现在后台任务解完一张
+会再看一眼最新目标，过期的直接跳过。目标帧还没解好时退回缓存里**角度最近**的一档
+（不是"最后一张"——那可能差几十度）。
 
 调试开关：`-Dsalvosequence.style=RAW|BLUR|BLOOM`、`-Dsalvosequence.profile`、
 `-Dsalvosequence.novsync`、`-Dsalvosequence.smoke.png=<path>`、`-Dsalvosequence.smoke.frames=<n>`。
@@ -177,8 +283,13 @@ Android/data/com.hysx.salvosequence/files/backdrops/custom/
   会变成 9px 一根的粗彩虹。所以窗口/全屏越大，格栅越细、越接近实机观感。
 - 画在**所有风格化之后**（合成完再压）：真实显像管里格栅就贴在荧光粉前面，作用在最终
   出射的光上。
+- **开格栅时自动切双线性平滑放大**（`PixelGameView.updateSampling()`）：最近邻会把每个
+  设计像素硬切成 3×3 的方块，三色荧光条被黑矩阵切得太利落，看着像贴了层彩膜；改成
+  双线性后相邻设计像素互相渗一点，荧光条也跟着柔化，才有电子束"浸染"进玻璃的感觉。
+  这条会盖过 F7 的像素化开关（格栅优先级更高），关掉格栅即恢复 F7 的最近邻。
 
-`docs/crt-grille.png` 是同一帧的左右对照（左：关；右：开，4 倍放大）。
+`docs/crt-grille.png` 是同一帧的左右对照（左：关；右：开，4 倍放大）；
+`docs/grille-smooth.png` 是"硬像素 vs 平滑浸染"的 4 倍对照。
 
 ## 架构差异（相对 JavaFX 原版）
 
@@ -191,6 +302,51 @@ Android/data/com.hysx.salvosequence/files/backdrops/custom/
 - **图片加载**：JavaFX `Image` 全部换成 `core.PngLoader`（libGDX Pixmap 解码 → 非预乘 ARGB）。
 - **音频**：不变，仍是 JDK 自带 `javax.sound.sampled` / MIDI 合成。
 
+## 界面用 Aseprite 画（ui/）
+
+界面元素的"在哪、多大、点哪里"可以不在代码里写死，而是用 **Aseprite** 画好导出，游戏直接读。
+Aseprite 本身就是最顺手的像素界面编辑器（图层、参考图、切片都能用），没必要再造一个。
+
+约定（画的时候照这个来）：
+
+- 画布就是界面尺寸 **640×360**；
+- **贴图图层**用 `img.` 前缀，名字后半段是元素 id：`img.panel.left`、`img.gear`、`img.info.box`、`img.card.slot.0`；
+- **切片**（Slice）用**裸 id** 命名：`panel.left`、`gear`、`info.box`、`card.slot.0` —— 切片的矩形就是元素的绘制区域 + 点击热区；
+- 想标注"这块是热区"又不画像素，就把空图层放进 `hotspots` 组，命名 `hit.<id>`（游戏不读这些图层）；
+- 于是：**切片管"在哪、点哪里"，`img.` 图层管"长什么样"**，两者可以分开改。
+
+导出（一条命令，图层名和切片一起写进 JSON）：
+
+```bash
+tools/ase-export.sh                       # 导出 ui/ 下所有 .aseprite
+tools/ase-export.sh ui/battle.aseprite    # 只导一张
+# 等价于：
+# aseprite -b ui/battle.aseprite --list-layers --list-slices \
+#          --sheet ui/battle.png --data ui/battle.json --format json-array
+```
+
+游戏侧读法（`core/AseUi`）：
+
+```java
+AseUi ui = AseUi.active();             // 读 -Dsalvo.ase=ui/battle.json（或给目录 + -Dsalvo.ase.screen）
+int[] r = ui.slice("card.slot.0");     // 热区 {x,y,w,h}；没有这个切片返回 null
+int[] tex = ui.texture("gear");        // 贴图矩形：有切片且画了 img.gear 图层才返回
+ui.drawTexture(art, "gear");           // 按切片位置贴到画布上（透明处保留底下的画）
+```
+
+已经接上贴图的元素：左下梯形面板 `panel.left`、齿轮 `gear`、右下信息框 `info.box`
+（`CardLoopScreen.drawAseTexture(art, id)`：有贴图就贴、没有就画代码里的图形）。
+
+不传 `-Dsalvo.ase` 就完全走代码里的默认几何，所以布局文件是可选的增强。
+目前接上的是战斗卡槽 `card.slot.0..6`（`CardLoopScreen.cardBarRect` 先查切片、再查 `.uilab`、最后退回常量），
+绘制和热区共用这一个函数，挪一下两者一起动。
+
+`ui/battle.json` + `ui/battle.png` 是仓库里附的一份样例（12 个切片，其中 `card.slot.0` 故意挪到棋盘中央），
+配 `-Dsalvo.ase=ui/battle.json` 启动就能看到第一张卡换位置。
+
+> 没有 Aseprite、只想手摆热区的话，`D:\projects\uilab` 里还有个小工具能存 `.uilab`，
+> 游戏侧的 `core/UiLayout` 也照读——两条路并存，Aseprite 优先。
+
 ## 工具（tools/）
 
 - `CardLoopApp`：直达组舰者玩法循环的可玩入口
@@ -198,3 +354,14 @@ Android/data/com.hysx.salvosequence/files/backdrops/custom/
 - `CardLoopAudit`：固定种子把一局从选舰驱动到编入，导 11 张核对稿
 - `FlickerAudit`：文本闪烁逐帧导图
 - `SpriteExport` / `OutlineLab` / `ModuleLab` / `ShipLab` / `AudioSelfTest` / `AudioProbe`：素材导出与自检
+- `ase-export.sh`：把 `ui/*.aseprite` 导成界面数据（见上节）
+
+## 彩蛋：人物立绘（F12）
+
+任何界面按 `F12` 都能开关人物立绘（`sprites/portrait.png`，缩到 256 设计像素高、
+站在左边、脚底对齐 338 行）。它画在所有界面内容之上、过渡遮罩之下，不占布局、
+不改玩法；开关是会话级的，重开游戏恢复隐藏。
+
+- 自测/截图：加 `-Dsalvosequence.portrait=true` 一进游戏就显示。
+- 原来的诊断双导出（设计缓冲 + GL 屏幕帧）挪到 `F10`。
+- 实现在 `ui/ScreenManager`（懒加载 + 全局热键），`screen/experiment/PortraitOverlay` 只管贴图。

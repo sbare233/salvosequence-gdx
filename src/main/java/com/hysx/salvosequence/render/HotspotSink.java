@@ -21,6 +21,16 @@ public interface HotspotSink {
     void add(double x, double y, double w, double h, Runnable action);
 
     /**
+     * 指定<b>接下来登记的热区</b>属于哪个倾斜平面。
+     *
+     * <p>整块 UI 是微微斜过来的，棋盘那个平面斜得更多：指针落在棋盘上时，命中测试
+     * 要先把指针按同一个角度反着转回去，否则点到的格子和画出来的格子会差好几像素。
+     * 默认实现什么都不做，只有真正做了倾斜的实现类才需要覆盖。</p>
+     */
+    default void plane(com.hysx.salvosequence.core.UiTilt.Plane plane) {
+    }
+
+    /**
      * 登记一个带<b>悬浮</b>回调的可点区域：鼠标进入 / 离开时各调一次。
      *
      * <p>为什么需要：整屏画布没有节点树，界面要"鼠标指到哪一格就预览哪一格"，

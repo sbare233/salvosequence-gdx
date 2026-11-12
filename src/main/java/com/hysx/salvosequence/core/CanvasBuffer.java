@@ -18,6 +18,9 @@ public final class CanvasBuffer {
     private final PixelArt art;
     /** 本帧画过的中文文本（同样已就地贴进像素；留档供测试断言与诊断）。 */
     private final List<TextRun> texts = new ArrayList<>();
+    /** 浮动层：一组"同一高度"的面板和按钮先画到这张透明图上，再整块平移贴回底图。 */
+    private PixelArt layer;
+    private boolean layerActive;
 
     /**
      * 一段中文文本。
@@ -37,7 +40,117 @@ public final class CanvasBuffer {
 
     /** 底层绘制原语。 */
     public PixelArt art() {
-        return art;
+        return layerActive ? layer : art;
+    }
+
+    /**
+     * 开始画一层"浮动内容"。
+     *
+     * <p>这一层和棋盘那类贴底的平面不在同一个高度上，所以先画到透明层里，
+     * 收尾时按 {@link UiDepth} 算出来的位移整块贴回去 —— 层里的面板、按钮、文字
+     * 一起平移，彼此之间的间距不会变形（这点和逐控件偏移不同，间距不会越拉越开）。</p>
+     *
+     * <p>注意：层里的坐标仍然是整屏设计坐标，不用改任何绘制代码。</p>
+     */
+    public void beginLayer() {
+        if (layer == null) {
+            layer = new PixelArt(art.width(), art.height());
+        } else {
+            layer.clear();
+        }
+        layerActive = true;
+    }
+
+    /**
+     * 结束当前浮动层，按 (dx, dy) 整块贴回底图。
+     *
+     * @param dx 像素整数位移，一般来自 {@link UiDepth#shiftX(int)}
+     * @param dy 像素整数位移，一般来自 {@link UiDepth#shiftY(int)}
+     */
+    public void endLayer(int dx, int dy) {
+        if (!layerActive) {
+            return;
+        }
+        layerActive = false;
+        art.blitArgb(layer.buffer(), layer.width(), layer.height(), dx, dy, false);
+    }
+
+    /**
+     * 结束当前浮动层，按 {@code plane} 的透视姿态和平移量把整块贴回底图。
+     *
+     * <p>透视是三维的：层像一块悬在星幕里的板子，上沿往屏幕深处倒过去。层里所有东西
+     * （面板、按钮、文字）一起被投影，互相之间的间距和相对位置不变。贴图用<b>逆矩阵
+     * 反向采样</b>：每个目标像素都能在层里找到唯一来源，所以整片填满、不漏点；最近邻取样，
+     * 不做插值，保持像素画硬边。只处理 {@code (x,y,w,h)} 这块区域。</p>
+     *
+     * @param plane 透视平面（俯仰/偏航 + 平移深度），绘制与热区共用同一个
+     */
+    public void endLayer(UiTilt.Plane plane, int x, int y, int w, int h) {
+        if (!layerActive) {
+            return;
+        }
+        layerActive = false;
+        int[] src = layer.buffer();
+        int sw = layer.width();
+        int sh = layer.height();
+        int x0 = Math.max(0, x);
+        int y0 = Math.max(0, y);
+        int x1 = Math.min(art.width(), x + w);
+        int y1 = Math.min(art.height(), y + h);
+        int dx = plane.shiftX();
+        int dy = plane.shiftY();
+        if (!plane.tilted()) {
+            // 没有透视：纯平移，直接整块贴回去（省掉每像素的除法）
+            for (int sy = y0; sy < y1; sy++) {
+                int py = sy - dy;
+                if (py < 0 || py >= sh) {
+                    continue;
+                }
+                for (int sx = x0; sx < x1; sx++) {
+                    int px = sx - dx;
+                    if (px < 0 || px >= sw) {
+                        continue;
+                    }
+                    int argb = src[py * sw + px];
+                    if ((argb >>> 24) == 0) {
+                        continue;
+                    }
+                    art.blendArgb(sx, sy, argb);
+                }
+            }
+            return;
+        }
+        // 屏幕 → 层内坐标，用同一个平面的逆矩阵（和热区反变换完全一致）
+        double[] inv = plane.inverse();
+        for (int sy = y0; sy < y1; sy++) {
+            double rowC = inv[1] * (sy + 0.5) + inv[2];
+            double rowF = inv[4] * (sy + 0.5) + inv[5];
+            double rowW = inv[7] * (sy + 0.5) + inv[8];
+            for (int sx = x0; sx < x1; sx++) {
+                double cx = sx + 0.5;
+                double wgt = inv[6] * cx + rowW;
+                if (wgt == 0.0) {
+                    continue;
+                }
+                double lx = (inv[0] * cx + rowC) / wgt;
+                double ly = (inv[3] * cx + rowF) / wgt;
+                int px = (int) Math.floor(lx);
+                int py = (int) Math.floor(ly);
+                if (px < 0 || py < 0 || px >= sw || py >= sh) {
+                    continue;
+                }
+                int argb = src[py * sw + px];
+                if ((argb >>> 24) == 0) {
+                    continue;
+                }
+                art.blendArgb(sx, sy, argb);
+            }
+        }
+    }
+
+    /** 现在画的是不是浮动层（调试/断言用）。 */
+    public boolean layerActive() {
+        return layerActive;
     }
 
     public int width() {
@@ -55,6 +168,7 @@ public final class CanvasBuffer {
         // 避免有谁直接读纹理之外的东西时看到未提交的旧画面。
         art.flush();
         art.clear();
+        layerActive = false;
         texts.clear();
     }
 
@@ -70,7 +184,7 @@ public final class CanvasBuffer {
         CjkRasterizer.Rendered image = CjkRasterizer.render(content, designSize, color);
         if (image != null) {
             int top = (int) Math.round(baselineY) - (int) Math.round(designSize * 1.2);
-            art.blitArgb(image.argb(), image.width(), image.height(),
+            art().blitArgb(image.argb(), image.width(), image.height(),
                     (int) Math.rint(x), top, false);
         }
     }
