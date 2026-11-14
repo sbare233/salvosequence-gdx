@@ -263,11 +263,14 @@ public final class GlebaPlanet {
             "      float wall = (1.0 - smoothstep(0.92, 1.0, t)) * smoothstep(0.15, 0.70, t);\n" +
             "      vec3 wn = normalize(n - u_mineAxis * (1.20 * wall));\n" +
             "      float wdl = max(dot(wn, L), 0.0);\n" +
-            "      vec3 rock = mix(vec3(0.30, 0.255, 0.215), vec3(0.078, 0.068, 0.062), depth);\n" +
-            "      rock *= 0.42 + 0.82 * wdl;\n" +
+            "      vec3 rock = mix(vec3(0.34, 0.29, 0.245), vec3(0.125, 0.110, 0.098), depth);\n" +
+            // 坑壁的漫反射系数比地表低得多，纯 Lambert 一背光就掉成纯黑——整颗星球会读成
+            // 一块黑斑（用户说的"黑屏"）。这里把环境项垫高，暗面也留 0.55 的底色
+            "      rock *= 0.58 + 0.62 * wdl;\n" +
+            "      rock += vec3(0.045, 0.040, 0.036) * (1.0 - lit);\n" +
             // 每圈台阶的外沿提一点亮：几何挖出的台阶没有法线差，靠这条细棱才读得出层数
-            "      float benchEdge = smoothstep(0.94, 1.0, fract(t * 4.0)) * (1.0 - depth * 0.55);\n" +
-            "      rock += vec3(0.16, 0.14, 0.11) * benchEdge * (0.22 + 0.55 * lit);\n" +
+            "      float benchEdge = smoothstep(0.88, 0.99, fract(t * 4.0)) * (1.0 - depth * 0.45);\n" +
+            "      rock += vec3(0.19, 0.165, 0.13) * benchEdge * (0.30 + 0.60 * lit);\n" +
             // 顺坡而下的运输道：三条细暗线，夜面缀运矿灯
             "      float road = smoothstep(0.985, 1.0, abs(sin(phi * 3.0)));\n" +
             "      rock *= 1.0 - 0.30 * road * (0.40 + 0.60 * t);\n" +
@@ -279,8 +282,8 @@ public final class GlebaPlanet {
             "      col = mix(rock, magma, core * 0.95);\n" +
             "      col += vec3(1.00, 0.36, 0.08) * core * 0.60;\n" +
             // 坑口翻出来的亮色岩屑：一条细环，不盖住整圈台阶
-            "      float rim = smoothstep(0.86, 0.96, t) * (1.0 - smoothstep(0.96, 1.0, t));\n" +
-            "      col = mix(col, vec3(0.40, 0.35, 0.28) * (0.45 + 0.75 * lit), rim * 0.30);\n" +
+            "      float rim = smoothstep(0.80, 0.93, t) * (1.0 - smoothstep(0.93, 1.0, t));\n" +
+            "      col = mix(col, vec3(0.46, 0.40, 0.31) * (0.55 + 0.70 * lit), rim * 0.55);\n" +
             // 染色在坑沿收一点：网格是按格子中心挖的，多边形边界和这里的正圆差半个格子，
             // 不收就会在坑外留一圈"只染色没挖下去"的平环，坑转到球面边缘时特别明显
             "      col = mix(outer, col, smoothstep(1.0, 0.90, t));\n" +
@@ -425,6 +428,10 @@ public final class GlebaPlanet {
     private int builtBuild = -1;
     /** 正在生成的那一轮几何是按哪个巨构类型挖的（-1 = 没有在生成）。 */
     private int pendingBuild = -1;
+    /** 排查"黑屏"用：没有网格可画时只打印一次。 */
+    private boolean diagNoMesh;
+    /** 网格丢失后的自动重建次数（限 3 次，别变成死循环）。 */
+    private int diagRetry;
     /** 气态行星的球面（非气态时为 null）。 */
     private com.hysx.salvosequence.gleba.render.GasGiant gasMesh;
 
@@ -712,6 +719,14 @@ public final class GlebaPlanet {
         if (!generating && lastData != null && builtBuild != params.build) {
             regen();
         }
+        // 兜底：没网格、没在生成、也没有地表数据 —— 状态已经坏了（例如换巨构时重建失败），
+        // 这里重来一次完整生成，免得永远停在一块黑屏上。限次，别变成每帧重试的死循环。
+        if (!generating && mesh == null && gasMesh == null && lastData == null
+                && builtBuild >= 0 && diagRetry < 3) {
+            diagRetry++;
+            System.out.println("[gleba] 网格丢失，重建一次（第 " + diagRetry + " 次）");
+            regen();
+        }
     }
 
     /**
@@ -824,6 +839,12 @@ public final class GlebaPlanet {
     /** 3D 渲染 → FBO → 读回像素（非预乘 ARGB，行距 FBW，已翻转成设计坐标）。 */
     public int[] renderFrame() {
         ensureGl();
+        if (mesh == null && gasMesh == null && Boolean.getBoolean("salvo.diag") && !diagNoMesh) {
+            // 真出现"黑屏"时把状态打出来：是还在生成，还是生成完却没建出网格
+            diagNoMesh = true;
+            System.out.printf("[gleba] 无网格可画：generating=%s builtBuild=%d build=%d lastData=%s%n",
+                    generating, builtBuild, params.build, lastData != null);
+        }
         fbo.begin();
         Gdx.gl.glViewport(0, 0, FBW, FBH);
         Gdx.gl.glClearColor(0.015f, 0.02f, 0.035f, 1f);
@@ -1182,7 +1203,11 @@ public final class GlebaPlanet {
         // 偏角 32°–42°：坑半径 0.5 弧度（约 29°），太靠边（50° 以上）整个坑会贴着
         // 轮廓线被压成一条月牙，看着像"被地表盖住"；太居中又会顶在正面正中
         mineAxis.set(camDir).mulAdd(lateral, 0.62f + mr.nextFloat() * 0.30f).nor();
-        mineRadius = 0.48f + mr.nextFloat() * 0.14f;
+        // 坑整个落在夜面时就是一团纯黑，什么都看不出来——往向阳面推一点
+        if (mineAxis.dot(sunDir) < 0.35f) {
+            mineAxis.mulAdd(sunDir, 1.2f).nor();
+        }
+        mineRadius = 0.26f + mr.nextFloat() * 0.10f;
         if (Boolean.getBoolean("salvo.minedbg")) {
             System.out.printf("[mine] build=%d axis=(%.3f,%.3f,%.3f) radius=%.3f camDir=(%.3f,%.3f,%.3f)%n",
                     params.build, mineAxis.x, mineAxis.y, mineAxis.z, mineRadius,
@@ -1202,12 +1227,14 @@ public final class GlebaPlanet {
             final int freqFast = Integer.getInteger("salvo.hex", params.meshFreq);
             final com.hysx.salvosequence.gleba.render.HexMesh.Carve carveFast = mineCarve(params.build);
             try {
+                // 先建后换：旧的留着画，新的建好再 dispose——切巨构时不会出现一帧空白
+                com.hysx.salvosequence.gleba.render.HexMesh.Cells fresh =
+                        com.hysx.salvosequence.gleba.render.HexMesh
+                                .build(lastData, 0f, true, freqFast, carveFast);
                 if (mesh != null) {
                     mesh.dispose();
-                    mesh = null;
                 }
-                mesh = com.hysx.salvosequence.gleba.render.HexMesh
-                        .build(lastData, 0f, true, freqFast, carveFast);
+                mesh = fresh;
             } catch (Throwable e) {
                 // 重建失败就退回完整生成，别把 mesh 留在 null（那样整帧什么都不画 = 黑屏）
                 System.out.println("[gleba] 换巨构重建失败，回退完整生成: " + e);
@@ -1260,7 +1287,7 @@ public final class GlebaPlanet {
         }
         final float ax = mineAxis.x, ay = mineAxis.y, az = mineAxis.z;
         final float radius = mineRadius;
-        final float depth = 0.40f;
+        final float depth = 0.22f;
         // 坑口的局部正交基：用极角给坑沿加低频扰动，坑才不是一顶正圆的帽子
         Vector3 axis = new Vector3(ax, ay, az);
         Vector3 u = Math.abs(axis.y) < 0.9f ? new Vector3(0f, 1f, 0f) : new Vector3(1f, 0f, 0f);
@@ -1391,6 +1418,11 @@ public final class GlebaPlanet {
 
     public boolean isGenerating() {
         return generating;
+    }
+
+    /** 现在有没有可画的地形网格（生成中也会保留上一颗的网格，界面靠它决定要不要画黑）。 */
+    public boolean hasMesh() {
+        return mesh != null || gasMesh != null;
     }
 
     public String status() {

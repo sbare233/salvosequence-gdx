@@ -955,7 +955,9 @@ public final class LiveBackdrops {
             double step = lastPlanetTime < 0 ? 1.0 / 30.0 : Math.min(0.25, time - lastPlanetTime);
             lastPlanetTime = time;
             planet.update(Math.max(1.0 / 120.0, step));
-            if (planet.isGenerating()) {
+            // 生成中如果有旧网格就继续画旧的：切巨构（比如矿业星要重挖坑）时，
+            // 等新几何的那一两秒不该是一块黑屏
+            if (planet.isGenerating() && !planet.hasMesh()) {
                 return null;
             }
             return planet.renderFrame();
