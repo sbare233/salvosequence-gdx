@@ -794,6 +794,7 @@ public final class BackdropLabScreen implements Screen {
             case "starRadius" -> "星半径";
             case "bloomStrength" -> "泛光强度";
             case "bloomThreshold" -> "泛光阈值";
+            case "palette" -> "配色档位";
             default -> null;
         };
         if (zh != null) {

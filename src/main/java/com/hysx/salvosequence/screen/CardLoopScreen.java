@@ -194,6 +194,21 @@ public final class CardLoopScreen implements Screen {
     private static final double DISK_TWINKLE_RADIUS = 252;
     /** 核心屏障半径（盘面像素）：屏障内是太阳系，不放闪烁星，免得盖住起始星与太阳标记。 */
     private static final double CORE_BARRIER_R = 30;
+    /** 星区引线的锚点半径（盘面像素）：落在星盘外缘，引线从盘边伸出来而不是穿过亮核。 */
+    private static final double ZONE_ANCHOR_R = 236;
+    /** 星区名在左右两侧的位置：文字靠边、引线停在文字外侧 5px，两组常量绘制和居中共用。 */
+    private static final int ZONE_TEXT_LEFT = 100;
+    private static final int ZONE_WIRE_LEFT = 112;
+    private static final int ZONE_TEXT_RIGHT = 540;
+    private static final int ZONE_WIRE_RIGHT = 528;
+    /** 引线标签的上下边界与最小行距：星盘转过来时两枚标签不许叠在一起。 */
+    private static final int ZONE_LABEL_TOP = 44;
+    private static final int ZONE_LABEL_BOTTOM = 300;
+    private static final int ZONE_LABEL_GAP = 16;
+    /** 引线几何：出盘短桩 10px，45° 折 4px，折后水平跑 18px（整条线读起来像电路走线）。 */
+    private static final int ZONE_STUB = 10;
+    private static final int ZONE_JOG = 4;
+    private static final int ZONE_JOG_RUN = 18;
     /** 拖动方向：+1 = 向右拖时旋转角增大，-1 = 反向。 */
     private static final double STAR_DRAG_DIRECTION = -1.0;
     /**
@@ -266,8 +281,35 @@ public final class CardLoopScreen implements Screen {
     /** 设置面板：战斗/星图里按 ESC 打开，含音乐/音效开关、返回标题、退出游戏。 */
     private boolean settingsOpen;
     private int settingsCursor;
-    /** 设置项：0=继续 1=音乐 2=音效 3=扫描线 4=形状 5=时机 6=格栅 7=风格化 8=背景滤镜 9=语言 10=返回标题 11=退出游戏。 */
+    /** 设置项：0=继续 1=音乐 2=音效 3=CRT 4=格栅图案 5=屏幕扭曲 6=辉光 7=混合 K 滑条 8=背景滤镜 9=视差 10=透视 11=语言 12=返回标题 13=退出游戏。 */
     private static final int SETTINGS_ITEMS = 14;
+    /** 混合 K 那一行：唯一一根滑条，点/拖/左右键都改 {@link VideoSettings#mixK()}。 */
+    private static final int SETTINGS_MIX_ROW = 7;
+    /** 设置面板与行距：绘制和热区共用，之前两边面板高度不同（300 / 340），热区整体错开一行。 */
+    private static final int SETTINGS_W = 268;
+    private static final int SETTINGS_H = 340;
+    private static final int SETTINGS_ROW_TOP = 40;
+    private static final int SETTINGS_ROW_H = 20;
+    /** 滑条轨道：行内左让出标签、右边留给数值和行号，轨道本身 96px 宽。 */
+    private static final int SETTINGS_SLIDER_X = 104;
+    private static final int SETTINGS_SLIDER_W = 96;
+    /** F2 背景菜单：8 个场景一屏列完，行高与面板宽沿用设置面板的节奏。 */
+    private static final int BACKDROP_MENU_W = 328;
+    private static final int BACKDROP_MENU_ROW_H = 22;
+    private boolean backdropMenuOpen;
+    private int backdropMenuScene;
+    private int backdropMenuPreset;
+    /** 打开菜单前的机位下标（-1 = 随机），Esc 关掉时恢复原样。 */
+    private int backdropMenuSavedPreset = -1;
+    private int backdropMenuSavedScene;
+
+    private static int settingsX() {
+        return (640 - SETTINGS_W) / 2;
+    }
+
+    private static int settingsY() {
+        return (360 - SETTINGS_H) / 2;
+    }
     /** 主题背景静态层（Backdrops：10 主题 × 4 变体，按节点确定性选播）。 */
     private int[] backdropLayer;
     private int backdropKey = -1;
@@ -663,18 +705,17 @@ public final class CardLoopScreen implements Screen {
 
     @Override
     public ScreenContext onKey(String code) {
-        // 调试键：F2 逐个翻机位（48 条，含近地轨道/恒星远近），F3 换星球类型
+        // 调试键：F2 弹背景菜单（背景一多，逐个翻机位不如直接点名），F3 换星球类型
         if ("F2".equals(code)) {
-            int n = com.hysx.salvosequence.live.CameraPresets.count();
-            debugPresetIndex = (debugPresetIndex + 1) % n;
-            com.hysx.salvosequence.live.CameraPresets.Preset p =
-                    com.hysx.salvosequence.live.CameraPresets.get(debugPresetIndex);
-            com.hysx.salvosequence.live.LiveBackdrops.applyPreset(p);
-            liveScene = p.scene;
-            liveSceneNode = run.node();
-            liveSceneVisits = run.visitedCount();
-            say("机位 " + (debugPresetIndex + 1) + "/" + n + "：" + p.label);
+            if (backdropMenuOpen) {
+                closeBackdropMenu(true);
+            } else {
+                openBackdropMenu();
+            }
             return null;
+        }
+        if (backdropMenuOpen) {
+            return backdropMenuKey(code);
         }
         if ("F3".equals(code)) {
             var themes = com.hysx.salvosequence.gleba.gen.PlanetTheme.values();
@@ -877,6 +918,8 @@ public final class CardLoopScreen implements Screen {
 
     /** 打开设置（战斗 / 星图里按 ESC）。 */
     private void openSettings() {
+        // 两个浮层互斥：背景菜单开着时先收起来，免得 F2 菜单压在设置面板上
+        backdropMenuOpen = false;
         settingsOpen = true;
         settingsCursor = 0;
         touch();
@@ -898,11 +941,22 @@ public final class CardLoopScreen implements Screen {
                 touch();
             }
             case "LEFT", "RIGHT", "A", "D" -> {
-                if (settingsCursor >= 1 && settingsCursor <= 11) {
+                if (settingsCursor == SETTINGS_MIX_ROW) {
+                    // 滑条行：左右键按步进推 k，不走"切换"那一套
+                    VideoSettings.nudgeMixK("LEFT".equals(code) || "A".equals(code)
+                            ? -VideoSettings.MIX_K_STEP : VideoSettings.MIX_K_STEP);
+                    touch();
+                } else if (settingsCursor >= 1 && settingsCursor <= 11) {
                     activateSettings(settingsCursor);
                 }
             }
             case "ENTER", "SPACE" -> {
+                if (settingsCursor == SETTINGS_MIX_ROW) {
+                    // 回车把滑条归位到调参时的原始手感
+                    VideoSettings.resetMixK();
+                    touch();
+                    return null;
+                }
                 return activateSettings(settingsCursor);
             }
             default -> {
@@ -912,7 +966,7 @@ public final class CardLoopScreen implements Screen {
         return null;
     }
 
-    /** 0=继续 1=音乐 2=音效 3=扫描线 4=扫描线形状 5=扫描线时机 6=孔径格栅 7=风格化 8=语言 9=返回标题 10=退出游戏。 */
+    /** 0=继续 1=音乐 2=音效 3=CRT 4=格栅图案 5=屏幕扭曲 6=辉光 7=混合 K（滑条） 8=背景滤镜 9=视差 10=透视 11=语言 12=返回标题 13=退出游戏。 */
     private ScreenContext activateSettings(int index) {
         switch (index) {
             case 0 -> {
@@ -931,28 +985,27 @@ public final class CardLoopScreen implements Screen {
                 return null;
             }
             case 3 -> {
-                VideoSettings.toggleScanlines();
+                VideoSettings.cycleCrtFilter();
                 touch();
                 return null;
             }
             case 4 -> {
-                VideoSettings.cycleScanlineShape();
+                VideoSettings.cycleGrilleStyle();
                 touch();
                 return null;
             }
             case 5 -> {
-                VideoSettings.cycleScanlineOrder();
+                VideoSettings.toggleScreenWarp();
                 touch();
                 return null;
             }
             case 6 -> {
-                VideoSettings.toggleApertureGrille();
+                VideoSettings.toggleBloom();
                 touch();
                 return null;
             }
             case 7 -> {
-                VideoSettings.cycleStyle();
-                touch();
+                // 滑条行：回车已在 settingsKey 里拦掉（归位 1.00），这里不做切换
                 return null;
             }
             case 8 -> {
@@ -992,10 +1045,10 @@ public final class CardLoopScreen implements Screen {
     /** 设置面板：居中面板（战斗/星图状态原样保留在底下）。 */
     private void drawSettingsOverlay(CanvasBuffer buffer, PixelArt art) {
         // 暗幕保持关闭（诊断过：它会把盘底座的边藏掉）；改用不透明面板压住底图
-        int w = 268;
-        int h = 340;
-        int x = (640 - w) / 2;
-        int y = (360 - h) / 2;
+        int w = SETTINGS_W;
+        int h = SETTINGS_H;
+        int x = settingsX();
+        int y = settingsY();
         UiChrome.panel(art, x, y, w, h);
         UiChrome.plate(buffer, art, x + 10, y - 8, 56, 17, Language.t("设置", "SETUP"));
         UiChrome.latin(art, "BATTLE CONFIG", x + w - 8 - UiChrome.measureLatin("BATTLE CONFIG"),
@@ -1004,24 +1057,318 @@ public final class CardLoopScreen implements Screen {
 
         String[] labels = settingLabels();
         for (int i = 0; i < SETTINGS_ITEMS; i++) {
-            int ry = y + 40 + i * 20;
+            int ry = y + SETTINGS_ROW_TOP + i * SETTINGS_ROW_H;
             boolean sel = i == settingsCursor;
+            boolean slider = i == SETTINGS_MIX_ROW;
             if (sel) {
-                UiChrome.banner(buffer, art, x + 8, ry - 6, w - 16, 20, labels[i]);
+                // 滑条行只借横幅的琥珀底色，文字自己排——中间得让出轨道
+                UiChrome.banner(buffer, art, x + 8, ry - 6, w - 16, 20, slider ? "" : labels[i]);
             } else {
                 UiChrome.chamferFrame(art, x + 8, ry - 6, w - 16, 20, 2, Palette.STEEL_FAINT);
+            }
+            if (slider) {
+                drawMixSlider(buffer, art, x, ry, sel, labels[i]);
+            } else if (!sel) {
                 UiChrome.zh(buffer, labels[i], x + 26, ry - 1, 12, Palette.LINE_DIM);
             }
             UiChrome.sectionMark(art, x + 14, ry + 4, sel ? Palette.INK : Palette.STEEL_DIM);
             UiChrome.latin(art, String.format("%02d", i + 1), x + w - 22, ry + 1,
                     sel ? Palette.INK : Palette.LINE_FAINT);
         }
-        UiChrome.zh(buffer, Language.t("↑↓ 选择    ←→ 切换    Esc 关闭",
+        UiChrome.zh(buffer, Language.t("↑↓ 选择    ←→ 调整    Esc 关闭",
                 "UP/DOWN SELECT   LEFT/RIGHT CHANGE   ESC CLOSE"),
                 x + 14, y + h - 22, 12, Palette.LINE_FAINT);
     }
 
-    /** 动态文案：音乐/音效/扫描线显示开关，时机/风格化/滤镜/语言显示当前值。 */
+    /**
+     * 混合 K 的滑条：标签在左、轨道在中、两位小数在右。
+     *
+     * <p>轨道 6px 高（1px 框 + 4px 槽），已填充段亮一档，拖柄 3×10 压住当前值。
+     * 选中行底色是实心琥珀，所以框线和文字在选中时换成 {@code INK}，否则浅色字压在
+     * 橙条上读不出来；未选中时框用 {@code STEEL_DIM}、填充用 {@code STEEL}，免得在
+     * 深色面板上淡成一团。</p>
+     */
+    private void drawMixSlider(CanvasBuffer buffer, PixelArt art, int x, int ry,
+                               boolean sel, String label) {
+        UiChrome.zh(buffer, label, x + 26, ry - 1, 12, sel ? Palette.INK : Palette.LINE_DIM);
+        int sx = x + SETTINGS_SLIDER_X;
+        int sw = SETTINGS_SLIDER_W;
+        int ty = ry + 2;
+        art.frame(sx, ty, sw, 6, sel ? Palette.INK : Palette.STEEL_DIM);
+        art.fillRect(sx + 1, ty + 1, sw - 2, 4, Palette.PANEL);
+        int inner = sw - 2;
+        int fw = (int) Math.round(inner * mixKRatio());
+        if (fw > 0) {
+            art.fillRect(sx + 1, ty + 1, fw, 4, sel ? Palette.LINE : Palette.STEEL);
+        }
+        int kx = Math.max(0, Math.min(inner, fw));
+        if (sel) {
+            art.frame(sx + kx - 2, ty - 3, 5, 12, Palette.INK);
+        }
+        art.fillRect(sx + kx - 1, ty - 2, 3, 10, Palette.LINE);
+        // 数值右对齐到行号左边，别和 "08" 挤成一串
+        String value = String.format("%.2f", VideoSettings.mixK());
+        UiChrome.latin(art, value, x + SETTINGS_W - 40 - UiChrome.measureLatin(value),
+                ry + 1, sel ? Palette.INK : Palette.LINE_DIM);
+    }
+
+    /** 当前 k 在量程上的位置（0..1），绘制和热区共用。 */
+    private static double mixKRatio() {
+        double span = VideoSettings.MIX_K_MAX - VideoSettings.MIX_K_MIN;
+        return Math.max(0.0, Math.min(1.0, (VideoSettings.mixK() - VideoSettings.MIX_K_MIN) / span));
+    }
+
+    /** 指针横坐标 → k：轨道两端就是量程两端，按下即定位，拖动继续跟手。 */
+    private void setMixKFromPointer(double mx) {
+        double sx = settingsX() + SETTINGS_SLIDER_X;
+        double t = (mx - sx) / SETTINGS_SLIDER_W;
+        t = Math.max(0.0, Math.min(1.0, t));
+        VideoSettings.setMixK(VideoSettings.MIX_K_MIN
+                + t * (VideoSettings.MIX_K_MAX - VideoSettings.MIX_K_MIN));
+        touch();
+    }
+
+    // ---------------------------------------------------------------- F2 背景菜单
+
+    /**
+     * 打开背景菜单：光标落在当前场景上，机位落在当前那条上。
+     *
+     * <p>F2 原来是"逐条翻机位"的调试键——机位表长到 50 多条以后，想看某个场景得连按
+     * 十几次，所以改成弹菜单：↑↓ 选场景、←→ 该场景下的机位、P 切配色（体积星云）、
+     * Enter 留下、Esc 还原。</p>
+     */
+    private void openBackdropMenu() {
+        backdropMenuOpen = true;
+        settingsOpen = false;
+        backdropMenuSavedPreset = debugPresetIndex;
+        backdropMenuScene = debugPresetIndex >= 0
+                ? com.hysx.salvosequence.live.CameraPresets.get(debugPresetIndex).scene
+                : battleScene();
+        backdropMenuSavedScene = backdropMenuScene;
+        backdropMenuPreset = 0;
+        int[] presets = backdropPresets(backdropMenuScene);
+        for (int i = 0; i < presets.length; i++) {
+            if (presets[i] == debugPresetIndex) {
+                backdropMenuPreset = i;
+            }
+        }
+        releaseDrag();
+        touch();
+    }
+
+    /** 关菜单：{@code keep=false}（Esc）把机位退回打开前那条。 */
+    private void closeBackdropMenu(boolean keep) {
+        backdropMenuOpen = false;
+        if (keep) {
+            say("背景：" + com.hysx.salvosequence.live.LiveBackdrops.nameZh(backdropMenuScene)
+                    + "  机位 " + (backdropMenuPreset + 1) + "/"
+                    + Math.max(1, backdropPresets(backdropMenuScene).length));
+        } else {
+            debugPresetIndex = backdropMenuSavedPreset;
+            liveScene = backdropMenuSavedScene;
+            if (debugPresetIndex >= 0) {
+                com.hysx.salvosequence.live.LiveBackdrops.applyPreset(
+                        com.hysx.salvosequence.live.CameraPresets.get(debugPresetIndex));
+            }
+        }
+        touch();
+    }
+
+    private ScreenContext backdropMenuKey(String code) {
+        int scenes = com.hysx.salvosequence.live.LiveBackdrops.count();
+        int presets = Math.max(1, backdropPresets(backdropMenuScene).length);
+        switch (code) {
+            case "UP", "W" -> {
+                backdropMenuScene = Math.floorMod(backdropMenuScene - 1, scenes);
+                backdropMenuPreset = 0;
+                applyBackdropMenuChoice();
+            }
+            case "DOWN", "S" -> {
+                backdropMenuScene = Math.floorMod(backdropMenuScene + 1, scenes);
+                backdropMenuPreset = 0;
+                applyBackdropMenuChoice();
+            }
+            case "LEFT", "A" -> {
+                backdropMenuPreset = Math.floorMod(backdropMenuPreset - 1, presets);
+                applyBackdropMenuChoice();
+            }
+            case "RIGHT", "D" -> {
+                backdropMenuPreset = Math.floorMod(backdropMenuPreset + 1, presets);
+                applyBackdropMenuChoice();
+            }
+            case "P" -> toggleBackdropPalette();
+            case "R" -> rerollBackdropSeed();
+            // 巨构：巢都 / 矿业星 / 轨道加速器 / 太空电梯，只在 Gleba 那颗星球上生效
+            case "B" -> cyclePlanetBuild();
+            case "ENTER", "SPACE" -> closeBackdropMenu(true);
+            case "ESC", "ESCAPE" -> closeBackdropMenu(false);
+            default -> {
+            }
+        }
+        return null;
+    }
+
+    /** 把光标所在的"场景 + 机位"套到战斗背景上（打开菜单时就已经能看到效果）。 */
+    private void applyBackdropMenuChoice() {
+        int[] presets = backdropPresets(backdropMenuScene);
+        if (presets.length == 0) {
+            return;
+        }
+        backdropMenuPreset = Math.floorMod(backdropMenuPreset, presets.length);
+        int index = presets[backdropMenuPreset];
+        com.hysx.salvosequence.live.CameraPresets.Preset p =
+                com.hysx.salvosequence.live.CameraPresets.get(index);
+        // 工坊里点过"手动选场景"时会压住调试机位，这里先松开手动选择
+        com.hysx.salvosequence.live.LiveBackdrops.setSelected(-1);
+        debugPresetIndex = index;
+        com.hysx.salvosequence.live.LiveBackdrops.applyPreset(p);
+        livePreset = p;
+        liveScene = p.scene;
+        liveSceneNode = run.node();
+        liveSceneVisits = run.visitedCount();
+        touch();
+    }
+
+    /** 巨构档位：0 原始 → 1 巢都 → 2 矿业星 → 3 轨道加速器 → 4 太空电梯，切一次重生成一次星球。 */
+    private void cyclePlanetBuild() {
+        int next = Math.floorMod(com.hysx.salvosequence.live.LiveBackdrops.planetBuild() + 1,
+                com.hysx.salvosequence.gleba.gen.PlanetBuild.count());
+        com.hysx.salvosequence.live.LiveBackdrops.setPlanetBuild(next);
+        com.hysx.salvosequence.gleba.gen.PlanetBuild build =
+                com.hysx.salvosequence.gleba.gen.PlanetBuild.byIndex(next);
+        say(Language.t("巨构：" + build.zh, "MEGA: " + build.en));
+        touch();
+    }
+
+    /** 体积星云的配色档位：0 冷调 → 1 原版 → 2 玫瑰红 → 3 面纱青 → 4 猎户橙 → 5 反射紫，循环。 */
+    private void toggleBackdropPalette() {        Object params = com.hysx.salvosequence.live.LiveBackdrops.params(backdropMenuScene);
+        for (java.lang.reflect.Field f : com.hysx.salvosequence.live.LiveTune.fields(params)) {
+            if (!"palette".equals(f.getName())) {
+                continue;
+            }
+            int n = com.hysx.salvosequence.live.nebula.AlroNebulaLive.PALETTE_COUNT;
+            int next = ((int) Math.round(com.hysx.salvosequence.live.LiveTune.get(params, f)) + 1) % n;
+            com.hysx.salvosequence.live.LiveTune.set(params, f, next);
+            com.hysx.salvosequence.live.LiveSettings.save();
+            say("配色：" + com.hysx.salvosequence.live.nebula.AlroNebulaLive.paletteNameZh(next));
+            touch();
+            return;
+        }
+        say("这个场景没有配色档位");
+    }
+
+    /** 体积星云的云形种子：0 原样，1..11 各是一团不同的云，按 R 循环。 */
+    private void rerollBackdropSeed() {
+        Object params = com.hysx.salvosequence.live.LiveBackdrops.params(backdropMenuScene);
+        for (java.lang.reflect.Field f : com.hysx.salvosequence.live.LiveTune.fields(params)) {
+            if (!"seed".equals(f.getName())) {
+                continue;
+            }
+            int n = com.hysx.salvosequence.live.nebula.AlroNebulaLive.SEED_COUNT;
+            int next = ((int) Math.round(com.hysx.salvosequence.live.LiveTune.get(params, f)) + 1) % n;
+            com.hysx.salvosequence.live.LiveTune.set(params, f, next);
+            com.hysx.salvosequence.live.LiveSettings.save();
+            say(next == 0 ? "种子：0（原样）" : "种子：" + next);
+            touch();
+            return;
+        }
+        say("这个场景没有云形种子");
+    }
+
+    /** 某场景在机位表里的全部下标（机位表按场景分组的顺序）。 */
+    private static int[] backdropPresets(int scene) {
+        int total = com.hysx.salvosequence.live.CameraPresets.count();
+        int n = 0;
+        for (int i = 0; i < total; i++) {
+            if (com.hysx.salvosequence.live.CameraPresets.get(i).scene == scene) {
+                n++;
+            }
+        }
+        int[] out = new int[n];
+        int k = 0;
+        for (int i = 0; i < total; i++) {
+            if (com.hysx.salvosequence.live.CameraPresets.get(i).scene == scene) {
+                out[k++] = i;
+            }
+        }
+        return out;
+    }
+
+    /** 画 F2 背景菜单：一行一个场景，右边是该场景的机位数与配色档位。 */
+    private void drawBackdropMenu(CanvasBuffer buffer, PixelArt art) {
+        int scenes = com.hysx.salvosequence.live.LiveBackdrops.count();
+        int w = BACKDROP_MENU_W;
+        int top = 34;
+        int h = top + scenes * BACKDROP_MENU_ROW_H + 44;
+        int x = (640 - w) / 2;
+        int y = (360 - h) / 2;
+        UiChrome.panel(art, x, y, w, h);
+        UiChrome.plate(buffer, art, x + 10, y - 8, 64, 17, Language.t("背景", "SCENE"));
+        String en = "F2 SCENE PICKER";
+        UiChrome.latin(art, en, x + w - 8 - UiChrome.measureLatin(en), y + 5, Palette.STEEL_DIM);
+        UiChrome.divider(art, x + 8, y + 22, w - 16);
+
+        for (int i = 0; i < scenes; i++) {
+            int ry = y + top + i * BACKDROP_MENU_ROW_H;
+            boolean sel = i == backdropMenuScene;
+            if (sel) {
+                UiChrome.banner(buffer, art, x + 8, ry - 6, w - 16, 20, "");
+            } else {
+                UiChrome.chamferFrame(art, x + 8, ry - 6, w - 16, 20, 2, Palette.STEEL_FAINT);
+            }
+            UiChrome.sectionMark(art, x + 14, ry + 4, sel ? Palette.INK : Palette.STEEL_DIM);
+            UiChrome.latin(art, String.format("%02d", i + 1), x + 22, ry + 1,
+                    sel ? Palette.INK : Palette.LINE_FAINT);
+            UiChrome.zh(buffer, com.hysx.salvosequence.live.LiveBackdrops.nameZh(i),
+                    x + 40, ry - 1, 12, sel ? Palette.INK : Palette.LINE_DIM);
+            int presets = backdropPresets(i).length;
+            String counter = sel
+                    ? Language.t("机位 ", "CAM ") + (backdropMenuPreset + 1) + "/" + presets
+                    : Language.t("机位 ", "CAM ") + presets;
+            String tag = sel ? backdropPaletteLabel(i) : null;
+            String right = tag == null ? counter : tag + "  " + counter;
+            UiChrome.zhRight(buffer, right, x + w - 14, ry - 1, 12,
+                    sel ? Palette.INK : Palette.LINE_FAINT);
+        }
+        UiChrome.zh(buffer, Language.t("↑↓ 场景   ←→ 机位   P 配色   R 种子   B 巨构",
+                        "UP/DOWN SCENE   LEFT/RIGHT CAM   P PALETTE   R SEED   B BUILD"),
+                x + 14, y + h - 40, 12, Palette.LINE_FAINT);
+        UiChrome.zh(buffer, Language.t("Enter 应用    Esc 还原",
+                        "ENTER APPLY   ESC REVERT"),
+                x + 14, y + h - 22, 12, Palette.LINE_FAINT);
+    }
+
+    /** 行尾那截"配色 玫瑰红·种3 巨构 巢都"，只给带对应档位的场景显示。 */
+    private static String backdropPaletteLabel(int scene) {
+        Object params = com.hysx.salvosequence.live.LiveBackdrops.params(scene);
+        String label = null;
+        int seed = 0;
+        int build = -1;
+        for (java.lang.reflect.Field f : com.hysx.salvosequence.live.LiveTune.fields(params)) {
+            if ("palette".equals(f.getName())) {
+                int idx = (int) Math.round(com.hysx.salvosequence.live.LiveTune.get(params, f));
+                label = "配色 " + Language.t(
+                        com.hysx.salvosequence.live.nebula.AlroNebulaLive.paletteNameZh(idx),
+                        com.hysx.salvosequence.live.nebula.AlroNebulaLive.paletteNameEn(idx));
+            } else if ("seed".equals(f.getName())) {
+                seed = (int) Math.round(com.hysx.salvosequence.live.LiveTune.get(params, f));
+            } else if ("build".equals(f.getName())) {
+                build = (int) Math.round(com.hysx.salvosequence.live.LiveTune.get(params, f));
+            }
+        }
+        if (label != null && seed != 0) {
+            label = label + "·" + Language.t("种", "S") + seed;
+        }
+        if (build >= 0) {
+            com.hysx.salvosequence.gleba.gen.PlanetBuild b =
+                    com.hysx.salvosequence.gleba.gen.PlanetBuild.byIndex(build);
+            String mega = Language.t("巨构 " + b.zh, "BUILD " + b.en);
+            label = label == null ? mega : label + "  " + mega;
+        }
+        return label;
+    }
+
+    /** 动态文案：音乐/音效/CRT 滤镜模式/格栅图案/屏幕扭曲/辉光，背景滤镜/视差/透视/语言显示当前值。 */
     private String[] settingLabels() {
         return new String[]{
                 Language.t("继续游戏", "RESUME"),
@@ -1029,19 +1376,19 @@ public final class CardLoopScreen implements Screen {
                         Music.isMuted() ? "OFF" : "ON"),
                 Language.t("音效：", "SOUND: ") + Language.t(Sound.isMuted() ? "关" : "开",
                         Sound.isMuted() ? "OFF" : "ON"),
-                Language.t("扫描线：", "SCANLINES: ") + Language.t(VideoSettings.scanlines() ? "开" : "关",
-                        VideoSettings.scanlines() ? "ON" : "OFF"),
-                Language.t("扫描线形状：", "SCANLINE SHAPE: ")
-                        + Language.t(VideoSettings.scanlineShape().label(),
-                        VideoSettings.scanlineShape().labelEn()),
-                Language.t("扫描线时机：", "SCANLINE TIMING: ")
-                        + Language.t(VideoSettings.scanlineOrder().label(),
-                        VideoSettings.scanlineOrder().labelEn()),
-                Language.t("孔径格栅：", "APERTURE GRILLE: ")
-                        + Language.t(VideoSettings.apertureGrille() ? "开" : "关",
-                        VideoSettings.apertureGrille() ? "ON" : "OFF"),
-                Language.t("风格化：", "STYLE: ")
-                        + Language.t(VideoSettings.style().label(), VideoSettings.style().labelEn()),
+                Language.t("CRT 滤镜：", "CRT FILTER: ")
+                        + Language.t(VideoSettings.crtFilter().label(),
+                        VideoSettings.crtFilter().labelEn()),
+                Language.t("格栅图案：", "GRILLE: ")
+                        + Language.t(VideoSettings.grilleStyle().label(),
+                        VideoSettings.grilleStyle().labelEn()),
+                Language.t("屏幕扭曲：", "SCREEN WARP: ")
+                        + Language.t(VideoSettings.screenWarp() ? "开" : "关",
+                        VideoSettings.screenWarp() ? "ON" : "OFF"),
+                Language.t("混合柔化：", "SOFT MIX: ")
+                        + Language.t(VideoSettings.bloom() ? "开" : "关",
+                        VideoSettings.bloom() ? "ON" : "OFF"),
+                Language.t("混合 K：", "MIX K: "),
                 Language.t("背景滤镜：", "BACKDROP FILTER: ")
                         + Language.t(VideoSettings.backdropFilter().label(),
                         VideoSettings.backdropFilter().labelEn()),
@@ -1057,16 +1404,28 @@ public final class CardLoopScreen implements Screen {
         };
     }
 
-    /** 设置项的鼠标热区。 */
+    /** 设置项的鼠标热区：与绘制共用 SETTINGS_* 与行高，命中框就是选中横幅本身。 */
     private void settingsHotspots(HotspotSink sink) {
-        int w = 268;
-        int h = 340;
-        int x = (640 - w) / 2;
-        int y = (360 - h) / 2;
+        int w = SETTINGS_W;
+        int x = settingsX();
+        int y = settingsY();
+        // 面板是斜着贴回去的（draw() 里 endLayer(UiTilt.UI)），命中测试也要按同一个平面反算，
+        // 否则越靠边点得越偏——这里之前既少了平面，行距又和绘制差 20px。
+        sink.plane(UiTilt.UI);
         for (int i = 0; i < SETTINGS_ITEMS; i++) {
-            int ry = y + 40 + i * 20;
+            int ry = y + SETTINGS_ROW_TOP + i * SETTINGS_ROW_H;
             int index = i;
-            sink.add(x + 8, ry - 6, w - 16, 22, () -> {
+            if (i == SETTINGS_MIX_ROW) {
+                // 滑条行：按下就定位、按住继续跟手，走 drag 而不是 add
+                sink.drag(x + 8, ry - 6, w - 16, 20,
+                        (mx, my) -> setMixKFromPointer(mx),
+                        (mx, my) -> {
+                            settingsCursor = index;
+                            setMixKFromPointer(mx);
+                        });
+                continue;
+            }
+            sink.add(x + 8, ry - 6, w - 16, 20, () -> {
                 settingsCursor = index;
                 ScreenContext ctx = activateSettings(index);
                 pendingTransition = ctx;
@@ -1079,6 +1438,10 @@ public final class CardLoopScreen implements Screen {
     public void collectHotspots(HotspotSink sink) {
         if (settingsOpen) {
             settingsHotspots(sink);
+            return;
+        }
+        // 背景菜单是键盘独占的浮层：底下的棋盘/按钮一概不登记，免得点穿
+        if (backdropMenuOpen) {
             return;
         }
         boolean overlay = overlayStage();
@@ -1600,6 +1963,12 @@ public final class CardLoopScreen implements Screen {
             buffer.beginLayer();
             drawSettingsOverlay(buffer, buffer.art());
             buffer.endLayer(UiTilt.UI, 0, 0, 640, 360);
+        }
+        if (backdropMenuOpen) {
+            // 背景菜单是调试用的，压在最上面且不平贴（像素菜单不需要透视）
+            buffer.beginLayer();
+            drawBackdropMenu(buffer, buffer.art());
+            buffer.endLayer(UiTilt.NONE, 0, 0, 640, 360);
         }
     }
 
@@ -3239,19 +3608,9 @@ public final class CardLoopScreen implements Screen {
                 }
             }
         }
-        // 星区标签：五个扇区各标一个势力名（淡色，不干扰节点阅读）
-        String[] zoneNames = com.hysx.salvosequence.fleet.FactionCatalog.ZONES;
-        for (int zi = 0; zi < 5; zi++) {
-            double midTheta = (zi + 0.5) * Math.PI * 2 / 5 + starDiskRad();
-            double[] zp = StarDisk.project(Math.cos(midTheta) * 210, Math.sin(midTheta) * 210);
-            int zx = (int) Math.rint(zp[0]);
-            int zy = (int) Math.rint(zp[1]);
-            // 字体下限 12px：宽度按 12 号量（曾按 9 量 → 居中偏移 + 防裁剪判断失效）
-            int lw = (int) Math.ceil(textWidth(zoneNames[zi], 12));
-            if (zx - lw / 2 > 4 && zx + lw / 2 < 636 && zy > 24 && zy < 340) {
-                zh(buffer, zoneNames[zi], zx - lw / 2, zy, 12, Palette.LINE_FAINT);
-            }
-        }
+        // 星区标签：五个扇区各标一个势力名。不再压在星盘上——引线拉到左右两侧，
+        // 星盘转起来时引线跟着摆，文字始终停在画面边缘，既不挡节点也一眼能认。
+        drawZoneCallouts(buffer);
         // 核心屏障圈：虚线画在 CORE_BARRIER 半径处——让玩家看见屏障在哪
         if (!run.gatePassed()) {
             drawDiskCircle(art, CORE_BARRIER_R, Palette.LINE_FAINT);
@@ -3368,6 +3727,9 @@ public final class CardLoopScreen implements Screen {
     private static final double LIGHT_RADIUS = 260.0;
     /** 扇面半角固定 56.5°（星盘转一圈实测的最宽边缘），不再逐帧量角度。 */
     private static final double PROJ_HALF_ANGLE = Math.toRadians(56.5);
+    /** 灯罩逐行宽度（y=26 起）：顶盖最宽 48px，往下每行两侧各收 1px，收出 45° 斜边，y=34 起收成 32px 的灯口圆筒。 */
+    private static final int[] PROJ_SPAN = {
+            48, 46, 44, 42, 40, 38, 36, 34, 32, 32, 32, 32, 32};
     /** 扇面边缘的柔化宽度（弧度）：约 2.6°，够软但不会切出生硬的边。 */
     private static final float FAN_SOFT = 0.045f;
     /** 悬臂外渐隐：盘面亮度低于 COVER_LO 全黑，到 COVER_HI 完全受光。 */
@@ -3487,24 +3849,57 @@ public final class CardLoopScreen implements Screen {
         return v < 0 ? 0 : Math.min(v, 255);
     }
 
-    /** 投影器本体：从顶栏下伸出的悬臂 + 梯形灯体 + 发光灯口，画在光场之上。 */
+    /**
+     * 投影器本体：吊架 + 梯形灯罩 + 椭圆灯口，画在光场之上。
+     *
+     * <p>分三段立结构：吊架把灯头挂到顶栏下（不然它就是黑带里浮着的一块），灯罩靠
+     * 逐行收窄的斜边、顶面受光、侧棱倒角立出厚度，最后在灯口压一块钢色灯板、嵌一枚
+     * 压扁的椭圆镜片（核心冷白 → 蓝 → 钢青，径向衰减）。旧版是三条硬直角矩形叠成
+     * 一条横贯的亮条，既不像灯也不像镜头，看着像贴纸。</p>
+     */
     private void drawProjectorFixture(PixelArt art) {
-        // 悬臂：从顶栏边缘垂下来
-        art.fillRect(314, 22, 12, 6, Palette.PANEL_ALT);
-        art.frame(314, 22, 12, 6, Palette.PANEL_EDGE);
-        // 灯体（梯形）
-        double[] xs = {296, 344, 334, 306};
-        double[] ys = {27, 27, 39, 39};
-        art.polygon(xs, ys, Palette.PANEL);
-        art.polygonOutline(xs, ys, Palette.PANEL_EDGE);
-        art.hline(300, 339, 28, Palette.STEEL_FAINT);
-        // 灯口：一条冷白缝，外面一圈钢色压边
-        art.fillRect(308, 36, 24, 3, Palette.STEEL_FAINT);
-        art.hline(310, 329, 37, Palette.BLUE);
-        art.hline(312, 327, 38, Palette.LINE);
-        // 两侧卡箍
-        art.vline(27, 34, 302, Palette.PANEL_EDGE);
-        art.vline(27, 34, 337, Palette.PANEL_EDGE);
+        // 吊架：顶栏下沿的挂板 + 两根轭臂
+        art.fillRect(306, 23, 28, 1, Palette.PANEL_EDGE);
+        art.fillRect(313, 24, 3, 2, Palette.STEEL_FAINT);
+        art.fillRect(324, 24, 3, 2, Palette.STEEL_FAINT);
+
+        // 灯罩：外张的顶盖 + 45° 锥面 + 灯口圆筒。不用 polygon —— 斜边会落成半像素锯齿
+        for (int i = 0; i < PROJ_SPAN.length; i++) {
+            int y = 26 + i;
+            int x0 = 320 - PROJ_SPAN[i] / 2;
+            int x1 = x0 + PROJ_SPAN[i] - 1;
+            // 顶盖接天光最亮，锥面往下压暗，灯口圆筒被自己的灯照亮一档
+            if (y == 26) {
+                art.hline(x0, x1, y, Palette.STEEL);
+            } else if (y <= 30) {
+                art.hline(x0, x1, y, Palette.STEEL_DIM);
+            } else if (y <= 34) {
+                art.hline(x0, x1, y, Palette.STEEL_FAINT);
+            } else {
+                art.hline(x0, x1, y, Palette.PANEL_EDGE);
+            }
+            art.pixel(x0, y, Palette.PANEL);
+            art.pixel(x1, y, Palette.PANEL);
+        }
+
+        // 镜片：压扁的椭圆，发光体得有径向衰减才不像一条横贯的荧光灯管
+        double cx = 319.5;
+        double cy = 37.0;
+        double rx = 9.5;
+        double ry = 2.0;
+        for (int y = 35; y <= 38; y++) {
+            for (int x = 309; x <= 330; x++) {
+                double dx = (x + 0.5 - cx) / rx;
+                double dy = (y + 0.5 - cy) / ry;
+                double d = Math.sqrt(dx * dx + dy * dy);
+                if (d > 1.0) {
+                    continue;
+                }
+                art.pixel(x, y, d < 0.38 ? Palette.LINE
+                        : d < 0.78 ? Palette.BLUE
+                        : Palette.STEEL_DIM);
+            }
+        }
     }
 
     /** 恒星屏幕坐标：极坐标按星盘旋转角转到盘面，再做 30° 俯角的透视投影。 */
@@ -3522,6 +3917,119 @@ public final class CardLoopScreen implements Screen {
             double[] p = StarDisk.project(Math.cos(rad) * r, Math.sin(rad) * r);
             art.pixel((int) Math.rint(p[0]), (int) Math.rint(p[1]), color);
         }
+    }
+
+    /**
+     * 五个星区的势力名：引线出盘、拉到左右两侧写。
+     *
+     * <p>锚点跟着星盘转，文字停在画面边缘的固定槽位；同一侧最多三枚，按锚点高度排开后
+     * 强制至少 {@link #ZONE_LABEL_GAP} 的间距，所以转起来也不会两枚叠字。</p>
+     */
+    private void drawZoneCallouts(CanvasBuffer buffer) {
+        String[] names = com.hysx.salvosequence.fleet.FactionCatalog.ZONES;
+        int n = names.length;
+        double[] ax = new double[n];
+        double[] ay = new double[n];
+        for (int i = 0; i < n; i++) {
+            double theta = (i + 0.5) * Math.PI * 2 / n + starDiskRad();
+            double[] p = StarDisk.project(Math.cos(theta) * ZONE_ANCHOR_R,
+                    Math.sin(theta) * ZONE_ANCHOR_R);
+            ax[i] = p[0];
+            ay[i] = p[1];
+        }
+        for (int side = 0; side < 2; side++) {
+            boolean left = side == 0;
+            List<Integer> order = new ArrayList<>();
+            for (int i = 0; i < n; i++) {
+                if ((ax[i] < StarDisk.CENTER_X) == left) {
+                    order.add(i);
+                }
+            }
+            order.sort((a, b) -> Double.compare(ay[a], ay[b]));
+            int count = order.size();
+            int[] labelY = new int[count];
+            for (int k = 0; k < count; k++) {
+                labelY[k] = (int) Math.rint(Math.max(ZONE_LABEL_TOP,
+                        Math.min(ZONE_LABEL_BOTTOM, ay[order.get(k)])));
+            }
+            // 先向下撑开，再向上压回，两遍就能把间距和边界一起满足
+            for (int k = 1; k < count; k++) {
+                labelY[k] = Math.max(labelY[k], labelY[k - 1] + ZONE_LABEL_GAP);
+            }
+            for (int k = count - 2; k >= 0; k--) {
+                labelY[k] = Math.min(labelY[k], labelY[k + 1] - ZONE_LABEL_GAP);
+            }
+            for (int k = 0; k < count; k++) {
+                int i = order.get(k);
+                drawZoneCallout(buffer, names[i], ax[i], ay[i], labelY[k], left, i);
+            }
+        }
+    }
+
+    /**
+     * 一条星区引线：盘内接口点 → 出盘短桩 → 45° 折一折 → 横拉到竖轨 → 竖轨 → 5px 入线。
+     *
+     * <p>那个 45° 小折不是装饰：有了它整条线才有"电路走线"的样子，否则只有一根横杠。
+     * 折向左下还是左上按星区序号奇偶固定，转盘时不会忽上忽下。</p>
+     */
+    private void drawZoneCallout(CanvasBuffer buffer, String name, double ax, double ay,
+                                 int labelY, boolean left, int zoneIndex) {
+        PixelArt art = buffer.art();
+        int wireX = left ? ZONE_WIRE_LEFT : ZONE_WIRE_RIGHT;
+        int textEdge = left ? ZONE_TEXT_LEFT : ZONE_TEXT_RIGHT;
+        int y0 = (int) Math.rint(ay);
+        int x0 = (int) Math.rint(ax);
+        int dirX = left ? -1 : 1;
+        // 锚点：5×5 深色底 + 3×3 钢灰 + 亮点，压在星尘上也不会糊掉
+        art.rect(x0 - 2, y0 - 2, 5, 5, Palette.PANEL);
+        art.rect(x0 - 1, y0 - 1, 3, 3, Palette.STEEL);
+        art.pixel(x0, y0, Palette.LINE_DIM);
+        int stubX = x0 + dirX * ZONE_STUB;
+        art.hline(Math.min(x0, stubX), Math.max(x0, stubX), y0, Palette.STEEL_DIM);
+        int runEnd = stubX + dirX * (ZONE_JOG * 2 + ZONE_JOG_RUN);
+        if (Math.abs(runEnd - wireX) < 6) {
+            // 锚点已经贴到竖轨附近，折线挤不下，直接拉直
+            wireH(art, stubX, wireX, y0);
+        } else {
+            int jog = ((zoneIndex & 1) == 0) ? 1 : -1;
+            int jy = y0 + jog * ZONE_JOG;
+            for (int k = 1; k <= ZONE_JOG; k++) {
+                art.pixel(stubX + dirX * k, y0 + jog * k, Palette.LINE_FAINT);
+            }
+            int x1 = stubX + dirX * ZONE_JOG;
+            int x2 = x1 + dirX * ZONE_JOG_RUN;
+            wireH(art, x1, x2, jy);
+            for (int k = 1; k <= ZONE_JOG; k++) {
+                art.pixel(x2 + dirX * k, jy - jog * k, Palette.LINE_FAINT);
+            }
+            wireH(art, x2 + dirX * ZONE_JOG, wireX, y0);
+        }
+        // 竖轨引到标签高度，再横 5px 顶到文字边上
+        wireV(art, y0, labelY, wireX);
+        int tickX = left ? textEdge + 5 : textEdge - 5;
+        wireH(art, wireX, tickX, labelY);
+        // 末端小三角：让引线有方向感，而不是断在半空
+        art.pixel(tickX + dirX, labelY, Palette.LINE_DIM);
+        art.pixel(tickX + dirX * 2, labelY - 1, Palette.LINE_DIM);
+        art.pixel(tickX + dirX * 2, labelY + 1, Palette.LINE_DIM);
+        int w = (int) Math.ceil(textWidth(name, 12));
+        zh(buffer, name, left ? textEdge - w : textEdge, labelY - 6, 12, Palette.LINE_DIM);
+    }
+
+    /** 引线横段：先垫一像素深色阴影，线压在星尘和节点上才不糊。 */
+    private void wireH(PixelArt art, int xa, int xb, int y) {
+        int a = Math.min(xa, xb);
+        int b = Math.max(xa, xb);
+        art.hline(a, b, y + 1, Palette.PANEL);
+        art.hline(a, b, y, Palette.LINE_FAINT);
+    }
+
+    /** 引线竖段：阴影放在右侧一像素。 */
+    private void wireV(PixelArt art, int ya, int yb, int x) {
+        int a = Math.min(ya, yb);
+        int b = Math.max(ya, yb);
+        art.vline(a, b, x + 1, Palette.PANEL);
+        art.vline(a, b, x, Palette.LINE_FAINT);
     }
 
     /** 以 {@code centerX} 为水平中心写一段中文（按字宽算，2 字/3 字名都不会偏）。 */

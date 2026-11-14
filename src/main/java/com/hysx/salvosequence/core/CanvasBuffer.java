@@ -198,7 +198,40 @@ public final class CanvasBuffer {
                 capCenterY + designSize * 0.36, designSize, color);
     }
 
-    /** 本帧收集到的文本（渲染完像素后由视图统一交给覆盖层）。 */
+    /**
+     * 按墨迹水平居中的文本：光栅位图左右各留有一两像素内边距，按估计字宽居中会整体偏右。
+     *
+     * <p>{@code baselineY} 口径与 {@link #text} 一致（不是墨迹中心）。</p>
+     */
+    public void textInkCentered(String content, double centerX, double baselineY,
+                                double designSize, Color color) {
+        texts.add(new TextRun(content, centerX, baselineY, designSize, color));
+        CjkRasterizer.Rendered image = CjkRasterizer.render(content, designSize, color);
+        if (image == null) {
+            return;
+        }
+        int w = image.width();
+        int h = image.height();
+        int left = -1;
+        int right = -1;
+        for (int y = 0; y < h; y++) {
+            for (int x = 0; x < w; x++) {
+                if ((image.argb()[y * w + x] >>> 24) != 0) {
+                    if (left < 0 || x < left) {
+                        left = x;
+                    }
+                    if (x > right) {
+                        right = x;
+                    }
+                }
+            }
+        }
+        double inkCenter = left < 0 ? w / 2.0 : (left + right + 1) / 2.0;
+        int top = (int) Math.round(baselineY) - (int) Math.round(designSize * 1.2);
+        art().blitArgb(image.argb(), w, h, (int) Math.rint(centerX - inkCenter), top, false);
+    }
+
+
     public List<TextRun> texts() {
         return List.copyOf(texts);
     }

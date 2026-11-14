@@ -1,7 +1,11 @@
 // 来源：gleba-libgdx-mvp（蓝色大肥鱼）——Gleba 星球生成核心，包名归入本项目。
 package com.hysx.salvosequence.gleba.gen;
 
-/** 可调参数：只保留"自然"部分，人文/文明相关参数一律不做。 */
+/**
+ * 可调参数：生成部分是"自然"的（海陆、气候、地形），人文那一层只剩一个
+ * {@link #build} 开关——巨构建筑（巢都 / 矿业星 / 加速器 / 太空电梯）不改生成流水线，
+ * 只在地表着色与轨道几何上加一层。
+ */
 public final class PlanetParams {
     public long seed = 20261030L;
     public int faceRes = 148;             // 立方球每面边长：6×148² ≈ 131k 格（≈ 512×256）
@@ -21,6 +25,8 @@ public final class PlanetParams {
     public float noiseStrength = 1.0f;    // 高程噪声强度
     /** 星球类型预设：大陆占比 / 温度 / 降水 / 配色都从这里来。 */
     public PlanetTheme theme = PlanetTheme.EARTH;
+    /** 巨构类型（{@link PlanetBuild} 的下标）：0 原始 / 1 巢都 / 2 矿业星 / 3 加速器 / 4 太空电梯。 */
+    public int build = 0;
 
     public PlanetParams copy() {
         PlanetParams p = new PlanetParams();
@@ -33,6 +39,7 @@ public final class PlanetParams {
         p.climateEnabled = climateEnabled; p.advectionSteps = advectionSteps;
         p.noiseStrength = noiseStrength;
         p.theme = theme;
+        p.build = build;
         return p;
     }
 }

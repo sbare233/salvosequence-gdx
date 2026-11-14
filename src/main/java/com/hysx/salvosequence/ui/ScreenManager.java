@@ -796,8 +796,15 @@ public final class ScreenManager implements HotspotSink, TouchGestures.PointerSi
         UiChrome.chamferFrame(buffer.art(), BACK_X, BACK_Y + 2, BACK_W, BACK_H - 2, 3,
                 Palette.AMBER_DIM);
         UiChrome.chamferFill(buffer.art(), BACK_X + 3, BACK_Y + 6, 3, 8, 1, Palette.AMBER);
+        // 文字按墨迹居中：竖条右边到内框之间是文字区，竖向按字号（不是按基线）对齐。
+        // 之前用 textCentered（宽度 = 字号 × 字数、基线固定 +14）会整体偏右偏下。
         String label = Language.t("返回", "BACK");
-        buffer.textCentered(label, BACK_X + BACK_W / 2.0 + 2, BACK_Y + 14, 12, Palette.LINE);
+        double size = 12;
+        double areaLeft = BACK_X + 8;
+        double areaRight = BACK_X + BACK_W - 3;
+        double inkTop = BACK_Y + 2 + (BACK_H - 2 - size) / 2.0 - 1;
+        buffer.textInkCentered(label, (areaLeft + areaRight) / 2.0, inkTop + size * 0.92, size,
+                Palette.LINE);
     }
 
     private void drawDebug(CanvasBuffer buffer) {
@@ -833,14 +840,6 @@ public final class ScreenManager implements HotspotSink, TouchGestures.PointerSi
 
     public void setScanlineEnabled(boolean enabled) {
         VideoSettings.setScanlines(enabled);
-    }
-
-    public boolean isApertureGrilleEnabled() {
-        return VideoSettings.apertureGrille();
-    }
-
-    public void setApertureGrilleEnabled(boolean enabled) {
-        VideoSettings.setApertureGrille(enabled);
     }
 
     public boolean isDebugVisible() {

@@ -12,7 +12,7 @@ java -jar target/SalvoSequenceGdx.jar
 ```
 
 常用按键：`F11` 切全屏 · `Ctrl+W` 回 1280x720 窗口 · `Ctrl+Q` 退出 · `C` 直达组舰者 · `F1` 调试 · `F4` 素材实验室。
-战斗中：`F2` 逐条翻 52 个背景机位（星云/恒星/星球/脉冲星/黑洞 × 近/中/远构图，临时覆盖本场随机结果） · `F3` 循环星球类型。
+战斗中：`F2` 弹背景菜单（8 个场景逐行列出，↑↓ 选场景、←→ 选该场景的机位、`P` 切体积星云的配色（冷调蓝/原版暖褐/玫瑰红/面纱青/猎户橙/反射紫 六档）、`R` 换云形种子（12 种）、`B` 切行星巨构（原始/巢都/矿业星/轨道加速器/太空电梯/拉格朗日反应堆/光帆阵列/大气调节网/生物圈环带/星门/宇宙博物馆）、Enter 应用、Esc 还原） · `F3` 循环星球类型。
 
 系统属性：`-Dsalvosequence.windowed=true` 窗口启动；`-Dsalvosequence.music=battle` 试听战斗曲；
 `-Dcard.seed=20240601` 固定种子。
@@ -20,12 +20,37 @@ java -jar target/SalvoSequenceGdx.jar
 ## 打包
 
 ```bash
-bash build-tools/build-all.sh      # 一键：桌面 dist/SalvoSequenceGdx/ + 安卓 android/build/SalvoSequence.apk
-bash build-tools/build-desktop.sh  # 只打桌面（mvn package + 组装 dist，等价 package-jar.bat）
-bash build-tools/build-apk.sh      # 只打安卓
+bash build-tools/build-all.sh       # 一键：桌面 + 安卓 android/build/SalvoSequence.apk
+bash build-tools/build-desktop.sh   # 桌面基础版（mvn package + 组装 dist，等价 package-jar.bat）
+bash build-tools/build-exe.sh       # 桌面免装 Java 版（jlink 裁运行时，等价 package-exe.bat）
+bash build-tools/build-jpackage.sh  # 桌面 jpackage 版（真 .exe 启动器，等价 package-jpackage.bat）
+bash build-tools/build-apk.sh       # 只打安卓
 ```
 
-桌面端产物是 `dist/SalvoSequenceGdx/`：fat jar + `启动游戏.bat`（双击即玩）。
+桌面端三种产物，按需要挑一个跑（互不覆盖）：
+
+| 脚本 | 产物 | 启动方式 | 目标机要装 Java |
+| --- | --- | --- | --- |
+| `build-desktop.sh` / `package-jar.bat` | `dist/SalvoSequenceGdx/` | `启动游戏.bat` | 要 JRE 21+ |
+| `build-exe.sh` / `package-exe.bat` | `dist/SalvoSequenceGdx-exe/` | `启动游戏.bat`（调内置 runtime） | 不用 |
+| `build-jpackage.sh` / `package-jpackage.bat` | `dist/SalvoSequenceGdx-app/SalvoSequence/` | `SalvoSequence.exe` | 不用 |
+
+后两种都是**自带运行时**，整个目录拷走就能玩。区别在启动器：
+
+- `build-exe.sh` 用 `jlink` 裁一份 `java.base`+`java.desktop`+`jdk.unsupported` 的运行时（约 56MB），
+  启动器还是 `启动游戏.bat`（内容 ASCII+CRLF，调 `runtime\bin\javaw.exe`），总 144MB 左右。
+- `build-jpackage.sh` 用 JDK 自带的 `jpackage` 出 app-image，启动器是真的 `SalvoSequence.exe`
+  （带版本资源），运行时由 jpackage 自己 jlink，总 150MB 左右。想再出安装包把 `--type app-image`
+  换成 `exe`/`msi`，需要先装 WiX Toolset 3.x。
+
+两个注意点：
+
+1. `jlink` 要用普通 JDK。GraalVM / Liberica NIK 的 jlink 会裁出带 JVMCI 的运行时，跑起来直接
+   `Cannot use JVMCI compiler: No JVMCI compiler found` 退出，`build-exe.sh` 会拦下并提示改用
+   `JLINK=/path/to/jdk/bin/jlink`；`jpackage` 同理可用 `JPACKAGE=...` 指定。
+2. `jpackage` 在受限 shell / 沙箱里会把目标目录误判成不可写，报
+   `Destination directory ... is not writable` 或 `Cannot invoke "java.nio.file.Path.getFileSystem()"`
+   —— 换个普通命令行窗口重跑即可，不是脚本问题。
 安卓端产物是 `android/build/SalvoSequence.apk`，`adb install -r` 就能装。
 
 APK 那条走的是 SDK 自带命令行工具（javac → d8 → aapt2 → zipalign → apksigner），不依赖
@@ -50,28 +75,11 @@ AGP 的 core library desugaring），所以 Android 8.0 以上都能装；`java.
   拷进去再进工坊即可。
 - 桌面端的 `tools/` 打包与 MIDI 合成器不进 APK。
 
-## 画质风格（设置面板里切换）
+## 画质风格
 
-| 风格 | 实现 |
-|---|---|
-| 原画 | 直绘 |
-| 模糊 | 单 pass 高斯 + SCREEN 叠加（自写着色器） |
-| 辉光 | **gdx-vfx BloomEffect**（开源后处理链：亮部阈值 → 多 pass 高斯 → 原画合成） |
-
-辉光观感在 `ui/PixelGameView` 顶部的 `BLOOM_THRESHOLD / BLOOM_BLUR_PASSES / BLOOM_BLUR_AMOUNT / BLOOM_INTENSITY / BLOOM_BASE_INTENSITY` 常量里调。
-
-### 输入预压（模糊/辉光/孔径格栅）
-
-后处理会把亮部摊开，直接吃原画容易糊成一片白。所以 `PixelGameView.drawFrame` 在上屏前先调一次输入：
-
-| 条件 | 亮度 | 对比 |
-|---|---|---|
-| 风格 = 模糊 / 辉光 | ×0.8 | ×0.9 |
-| 再叠孔径格栅 | 再 ×0.9 | — |
-
-三个系数都在 `drawFrame` 上方的 `EFFECT_BRIGHTNESS / EFFECT_CONTRAST / GRILLE_BRIGHTNESS` 常量里。
-实现塞在原来补格栅亮度的 `beamShader` 里（contrast → brightness → 束流软膝），不额外多一次全屏 pass。
-辉光模式下 `drawFrame` 会被调用两次（屏幕铺底 + 输入捕获），两次都走同一套预压。
+最终上屏只有一个 CRT pass（见下方「CRT 滤镜」一节）：扫描线、格栅、桶形畸变和
+邻像素混合都在同一个片元着色器里完成，没有额外的后处理链；实时 3D 背景的像素化属于
+背景滤镜，和上屏 CRT 是两回事。
 
 ### 实时 3D 背景的像素化：拜耳 / 像素滤镜
 
@@ -84,26 +92,37 @@ AGP 的 core library desugaring），所以 Android 8.0 以上都能装；`java.
 
 背景工坊里 `K` 切这两种滤镜、`J` 切像素滤镜的调色板（原色/暖/冷/灰）。
 
-CRT 扫描线有三个设置项：**开关**、**形状**、**时机**（`VideoSettings.scanlines / scanlineShape / scanlineOrder`）。
+CRT 滤镜有四种模式（`VideoSettings.CrtFilter`）：**关 / 扫描线 / 孔径格栅 / 扫描线+格栅**。
+设置页按回车循环；调试时可用 `-Dsalvosequence.crt=SCANLINE` 等直接指定。
 
-| 形状 | 观感 |
-|---|---|
-| 直条 | 一整条贯穿整行的黑条，规整、最像"信号层面的行消隐" |
-| 锯齿（默认） | 锯齿只落在**单个设计像素内部**：一个设计像素恰好由红/绿/蓝三条荧光条组成，绿条的黑线整体比红/蓝低 1 个设备像素，于是红蓝变暗的那一行里绿条仍然亮着，看起来像绿点从扫描线里戳出来 |
+- 扫描线是**行**：每个设计像素占 `scale` 个设备像素，行尾压暗一条设备像素线
+  （2× 屏上一暗一亮，3× 屏上两亮一暗）。旧实现把 y 相位乘 0.3333，变成 3 个设计像素
+  才一条线，还让横竖采样混在一起 —— 这是"像素大小不对、文字发虚"的根因。
+- 孔径格栅是**列**：纵向红/绿/蓝荧光条，每条 1 个设备像素宽、三条一组，配比 0.5 / 1.5
+  （对应 crt.txt 的 `maskDark` / `maskLight`）。格栅固定在**设备像素**上，不跟设计像素
+  放大——游戏本身已经按 2×/3× 上屏，格栅再按设计像素算，每条会变成 3 个设备像素宽，
+  看起来就像像素又被放大了一次。
+- 格栅图案另有「格栅图案」一项（`VideoSettings.GrilleStyle`）：**栅条**（格栅2.txt 启用的
+  纵向孔径格栅，三条一组）或**荫罩**（crt.txt 的旋转 shadow mask，`x + y * (6 / u_scale)`，
+  一组 6 个设备像素、每条 2 像素宽，近看是斜纹；斜率随 2×/3× 自适应，保证一个设计像素行
+  正好走满一组，否则 3× 时奇偶像素行会错开半组）。调试可用 `-Dsalvosequence.grille=SHADOW`。
+- 「屏幕扭曲」是独立开关（`VideoSettings.screenWarp()`），**默认关**：关着画面四边是直的，
+  只保留扫描线/格栅；打开后才有桶形弧边。调试可用 `-Dsalvosequence.warp=true`。
+- 「混合柔化」（`VideoSettings.bloom()`，默认开）是**邻像素混色**，不是加亮，也不按
+  "放大后的像素块"整体上色：权重按当前**设备像素**落在设计像素里的位置算
+  （`f = fract(pos*res) - 0.5`），左右邻居 `exp2(-k·(f.x±1)²)` 始终参与，上下邻居
+  再乘 0.5 且只在**格栅开着**时参与（`u_grille`）——扫描线是横向扫描，纵向柔化归格栅。
+  最后除以权重和，亮度守恒。`k = C·s²`，`s = 2·scale/(scale+1)`，C 控制强度（越小越柔），
+  所以 2×/3× 的平均渗色量接近。像素中心几乎不混、越靠边邻居权重越大，光是从边界连续
+  渗出去的，不会把 3×3 个设备像素染成一块；平色区域不受影响。采样在扫描线之前发生，
+  缝里的颜色来自原图而不是被压暗后的行。调试可用 `-Dsalvosequence.mix=false`（旧名
+  `bloom` 仍兼容）；开/关对照（3× 全屏截图）见 `docs/crt-mix.png`。
+- 扫描线、格栅、混合、扭曲可以单独开，也可以叠加；全开最接近 crt.txt 三分屏右侧那一块。
 
-| 时机 | 观感 |
-|---|---|
-| 特效后 | 线条画在风格化结果之上，最锐利，辉光的亮部也会被压暗 |
-| 特效前（默认） | 线条先于风格化生效；辉光会把线条一起晕开、发亮，更接近老电视 |
-
-「特效前 + 辉光」时扫描线画进 gdx-vfx 的输入捕获再一起做辉光，避免同一道线在屏幕上被压暗两次。
-
-**整数倍缩放要单独对齐**（`PixelGameView.drawScanlines`）：一个设计像素铺满 `px` 个设备像素，
-黑条高度必须取整（`px=2 → 1`、`px=3 → 1`、`px=4 → 2`）。以前按 `period*0.5` 算，1080p 下
-得到 1.5 像素高的线，会被硬件插值摊成两行半透明的灰，画面上就是深浅不一的横纹。
-条宽同理：孔径格栅的栅距取 `max(1, round(px/3))`，让"一个三色组 ≈ 一个设计像素"的比例在
-2×/3×/4× 屏幕上都成立。黑条透明度从 0.75 放到 0.5——显像管的行间隙只是"这一行没被扫到"，
-不是一层黑纱。
+实现只有一个全屏片元着色器（`PixelGameView.makeCrtShader`）：取出帧纹理颜色后，
+先做邻像素混合（`u_mix`），再乘扫描线系数（`u_scan`）、乘格栅系数（`u_grille`）；
+`u_shadow` 选格栅图案，`u_warp` 控制桶形畸变。`OFF` 或缩放小于 2 时走直通路径，
+不做任何额外采样。
 
 ## 触摸操作（安卓）
 
@@ -167,12 +186,19 @@ CRT 扫描线有三个设置项：**开关**、**形状**、**时机**（`VideoS
   `CORE_BARRIER_R = 30` 以内不放，太阳系那块留干净），跟星盘一起转，
   亮度按 `sin(time·speed + phase)` 呼吸；近侧（`StarDisk.depthScale > 1.15`）的亮星多画一个像素，
   大小也跟着透视走。
-- 帧按需解码 + LRU 只留最近 16 张（约 15MB），不会一次把 1440 张（1.3GB）读进内存；
+- 帧按需解码 + LRU 只留最近 48 张（约 44MB），不会一次把 1440 张（1.3GB）读进内存；
   缺图/坏图会记进黑名单，不会每帧重试。
+- 这 1440 张存的是**调色板 PNG（PNG8，每张只有 70~84 色，解出来是 RGB888 内存布局）**，再用
+  `zopfli` 重压过 IDAT：比原来的 24 位真彩小 48%（1440 张 66.7MB → 34.6MB），用游戏自己的解码器
+  逐张核对过，1440 帧 ARGB 全部逐字节一致。`PngLoader` 对 RGBA8888 / RGB888 / 其它格式各有一条分支，
+  以后再换回真彩图也能读。
+- 换 WebP / GIF 没有意义：gdx 的 `Pixmap` 根本不认 WebP（实测 `Image not of any known type`），
+  单张 GIF 反而比 PNG8 大 31%；接成动画 GIF 靠帧间差能到 22MB，但只能从第 0 帧顺序解，星图随手
+  拖到任意角度会卡死。
 - 帧序号与旋转角的符号由 `StarDisk.FRAME_SIGN = -1` 控制：实测这批图的旋臂图案随序号增大是逆时针转，
   与节点盘的正向相反，所以取负号让两者同向。
 
-`mapback/` 会打进 APK（+69MB），如果只要小包，删掉资源目录后星图会退化成纯黑底 + 节点。
+`mapback/` 会打进 APK（+35MB），如果只要小包，删掉资源目录后星图会退化成纯黑底 + 节点。
 
 ## 背景工坊（backdrops-src/）
 
@@ -219,16 +245,24 @@ Android/data/com.hysx.salvosequence/files/backdrops/custom/
 |---|---|---|
 | `nebula` | 星云体积光 MVP | 橙红体积云 + 星点，相机不动；一帧约 2.3 ms |
 | `star` | 恒星 MVP | 颗粒感太阳，压在右上角；一帧约 1.1 ms |
-| `gleba` | 游戏自带的行星 | 复用 `GlebaPlanet`，生成期间返回 null、退回程序化背景 |
+| `gleba` | 游戏自带的行星 | 复用 `GlebaPlanet`，生成期间返回 null、退回程序化背景。**巨构层**：`B` 键（背景菜单里）循环 11 种——原始 / 巢都 / 矿业星 / 轨道加速器 / 太空电梯 / 拉格朗日反应堆 / 光帆阵列 / 大气调节网 / 生物圈环带 / 星门 / 宇宙博物馆；轨道巨构会按太阳方向在行星表面投下环带与缆绳影子 |
 | `pulsar` | 脉冲星 MVP | 中子星 + 磁极喷流 + 磁力线，落在右上角；一帧约 1.6 ms |
+| `crab` | 蟹状星云 | 体积丝状结构，云体自转 0.01 rad/s（10.5 分钟一圈） |
+| `alro` | 体积星云 | gyroid 气壳 + 瑞利散射，**360° 全景烘焙**：开机烘 1280×720 全景（16 块 × 12 帧抖动采样，约 4.3 秒），之后转多少度都只是从全景取样；配色六档：冷调蓝 / 原版暖褐 / 玫瑰红 / 面纱青 / 猎户橙 / 反射紫；云形种子 12 种（改气壳半径、云团偏心、太阳方位） |
 
 - 选哪个：战斗节点按 `节点号 + 访问次数` 确定性挑一个（同一个节点每次进都一样）；
   工坊里按 `L` 手动切（`LiveBackdrops.setSelected`），手动选中后战斗一律用它。
 - 压暗：实时底图会盖在棋盘和文字下面，所以按场景压暗——星云/星球留 70%，
   恒星 32%、脉冲星 30%（这两个有大片高光）。
 - 刷新：每 15 fps 重渲一帧，其余帧复用缓存（省下来的一半时间给软件画布）。
-- **相机不再自动转**：早期版本让相机随时间缓慢环绕，现在相机只由「指针拖拽旋转 / 滚轮缩放 /
-  存档里的角度」决定，所以同一场景在战斗里是静止的，不会自己漂移。
+- 全景：体积星云既没有视差也没有动画，镜头怎么转看到的都是同一片天球。所以开战时把它
+  烘成一张 1280×720 的等角（equirect）全景——16 块瓷砖、每块 320×180，各攒 12 帧抖动采样
+  （约 4.3 秒铺满），之后每帧只是按相机朝向在 CPU 上查表取样（0.05 ms），转镜头不再跑光线步进。
+  瓷砖按"正对相机"排序先铺底，所以烘到一半就转头也不会看到黑块。换配色档位会重新烘。
+  规格看 `FullscreenNebula` 的 `panoramaCols()` / `panoramaRows()` / `panoramaSamples()`。
+- **相机**：战斗里所有场景都会以 0.22°/s 缓慢横摆（工坊里关掉，方便停在某个机位）。体积星云是
+  全景，横摆只是换个方向取样（取样表约 0.5 秒重算一次，0.1° 一步、不到半个像素，看不出跳），
+  拖拽同样即时生效；拖了就停在那，不会自己滑走。
 - 调参：背景工坊右侧「实时参数」面板，第 0 页是 `偏航 / 俯仰 / 距离`，往后每页 6 个场景参数
   （点标题翻页、点行选中、再点同一行右半 `+` 左半 `-`，键盘 `↑↓` 选行、`-`/`=` 调值）。
   改完停手 0.4 秒自动存到 `live-params.conf`（`LiveSettings`，桌面在工作目录、安卓在
@@ -239,6 +273,38 @@ Android/data/com.hysx.salvosequence/files/backdrops/custom/
 四个场景（左上星云、右上恒星、左下星球、右下脉冲星）与战斗里的样子：
 `docs/live-scenes.png`、`docs/live-battle.png`。
 
+### 巨构材质异常（踩坑记录）
+
+巨构（`gleba/render/Megastructures.java`）偶尔会冒出一块"材质不对"的杂色：亮黄斑、
+马赛克、像贴错图的钢板。看着像驱动或法线问题，其实几乎都是下面五类，按出现频率排：
+
+1. **对插值过的 `uv.x` 直接取整**。材质号写成 `float matId = floor(v_uv.x);`，
+   而顶点上的 `u` 正好是整数（轮毂用 `2f`、桁架用 `3f`）。顶点着色器传过来的
+   `v_uv.x` 在每个像素上是插值出来的，2.0 会抖成 1.9999999 或 2.0000001，
+   `floor` 就在 1 和 2 之间逐像素跳——于是同一块圆盘上一半像素走"机件"分支、
+   一半走"薄膜帆"分支，暖色和冷色 1 像素交错，就是那团黄斑。
+   **规则：材质号一律 `floor(v_uv.x + 0.01)`**（星门的 `+0.001` 也是这个原因）。
+   小数部分表示色调档位时，别让它跨到下一个整数上去。
+2. **两个面几乎共面**。柱体的自带端盖和另加的一块圆盘只差 0.004，深度缓冲分不开，
+   整片互相打架。**规则：要么删掉多余的面，要么拉开 ≥0.01 的轴向距离。**
+3. **六边形圆柱**。`addCylinder(..., 6, ...)` 的侧面是一整块平面，端盖是一整块六边形，
+   阳光加 Bayer 抖动之后会读成"一块贴错的暗红钢板"。**规则：圆柱至少 20 边，
+   粗一点的机体 24 边。**
+4. **拿世界坐标撒细纹**。`h11(floor(v_pos.x * 60.0) + ...)` 在 320×180 下每格不到 1 像素，
+   镜头稍微一动相邻格子就翻色，整块板子像在抖。**规则：花纹只用 `v_uv`（跟着几何走），
+   或者按"件号"取一个色调，不要用世界坐标。**
+5. **`v_uv.y` 在不同图元上不是同一个意思**。圆柱侧面的 `y` 是绕轴的角向坐标，
+   `addDisc`/`addCylinder` 端盖的 `y` 却是"圆心 → 外缘"的**径向**坐标。同一句
+   `fract(v_uv.y * 18.0)` 在侧面上排 18 条环带，在端盖上却排成 18 圈同心环——
+   轮毂在屏幕上只有几个像素时，18 圈同心环直接糊成一块雪花点白斑。
+   **规则：径向/角向花纹要么只用侧面的 `uv`，要么改成跟视角走的渐变
+   （`dot(n, 视线)`），别指望 `uv.y` 在所有面上含义一致。**
+
+排查手法：`-Dsalvo.meshdbg=true` 打印每档 `uv` 的顶点数、半径范围和包围盒；
+临时加个开关（当时的 `salvo.nohub` / `salvo.nodish`）把一块几何抽掉做二分；
+`MegaShadowProbe` 会顺手写一张 `*_raw.png`（`LiveBackdrops.lastRaw`，
+像素滤镜之前的那一帧），用来区分"着色器画出来的"和"滤镜抖出来的"。
+
 ## 性能（实测）
 
 1080p 全屏、`-Dsalvosequence.profile=true`、关 vsync 测 600 帧：
@@ -248,48 +314,50 @@ Android/data/com.hysx.salvosequence/files/backdrops/custom/
 | 软件画布 draw | 3.03 ms | 0.74 ms |
 | 纹理上传 | 0.71 ms | 0.34 ms |
 | 原画 blit | 0.02 ms | 0.01 ms |
-| 辉光后处理 | 0.25 ms | 0.20 ms |
+| 辉光后处理（v44 前的独立链路） | 0.25 ms | 0.20 ms |
 | **每帧合计** | **4.19 ms（238 FPS）** | **1.46 ms（686 FPS）** |
 
+> 表中「辉光后处理」是旧独立链路的测量值；v45 起混合柔化已并入 CRT pass，未单独重测。
+
 提升来自四处：底色/尘埃带只在需要时扫（三角函数改查表 + 和角公式）、`ditherRect` 按步长跳写、
-桌面端用 `GL_BGRA` 直接灌 `IntBuffer` 上传、辉光链固定跑 640×360 再一次性放大。
+桌面端用 `GL_BGRA` 直接灌 `IntBuffer` 上传、帧纹理固定 640×360 再一次性放大。
 星盘换帧的 PNG 解码挪到后台线程（每帧取帧 ≈0.03ms），快速拖动不再卡。解码队列是
 **"永远只解最新目标"**：拖动时目标角度每帧都在跳，排一堆旧帧只会把最新那帧堵在后面
 （画面先停住、等新帧出来再猛跳到目标角度，看上去就是"突变"）；现在后台任务解完一张
 会再看一眼最新目标，过期的直接跳过。目标帧还没解好时退回缓存里**角度最近**的一档
 （不是"最后一张"——那可能差几十度）。
 
-调试开关：`-Dsalvosequence.style=RAW|BLUR|BLOOM`、`-Dsalvosequence.profile`、
-`-Dsalvosequence.novsync`、`-Dsalvosequence.smoke.png=<path>`、`-Dsalvosequence.smoke.frames=<n>`。
+调试开关：`-Dsalvosequence.crt=OFF|SCANLINE|GRILLE|SCANLINE_GRILLE`、
+`-Dsalvosequence.grille=APERTURE|SHADOW`、`-Dsalvosequence.warp=true|false`、
+`-Dsalvosequence.mix=true|false`（旧名 `bloom`）、`-Dsalvo.settings=open`、
+`-Dsalvosequence.profile`、`-Dsalvosequence.novsync`、`-Dsalvosequence.smoke.png=<path>`、
+`-Dsalvosequence.smoke.frames=<n>`。
 
 ## 孔径格栅（aperture grille）
 
 扫描线是**行**，孔径格栅是**列**：荫栅式显像管（Trinitron 一系）在玻璃后面挂着
-三色荧光竖条，条纹之间是黑矩阵，所以画面近看是一条条 R/G/B 的竖线。两边年代相同，
-代码里也做成并列的两个开关（设置页「孔径格栅」，可与扫描线同时开，默认关）。
+三色荧光竖条，所以近看是一条条 R/G/B 的竖线。现在它和扫描线是同一个 CRT pass 里的
+三个系数（`u_scan` / `u_grille` / `u_mix`），设置页「CRT 滤镜」可单独开、也可叠加：
 
-- 实现是 3×1 的 R/G/B 纹理横向平铺、一次 `batch.draw` 画完，混合方式是**乘法**
-  （`GL_DST_COLOR, GL_ZERO`）：红条只保留 R 通道、G/B 乘 `GRILLE_PASS = 0`，也就是
-  每条荧光粉**只发自己那一种色**，另外两个通道直接归零（不做任何混色）。绿/蓝条同理。
-- 只剩 1/3 的光会明显发暗，所以上屏前先过一遍"束流补偿"着色器（`BEAM_GAIN = 3.0`）：
-  `x*g/(1+x*(g-1))` 这种软拐点曲线，暗部按 g 放大、亮部渐近到 1。
-  **不能直接乘 g 再截断**——拜耳抖动的网点本来就在中灰，硬乘 3 会把整片网点顶到
-  255，亮度差被抹平，星系会糊成一坨白斑；软拐点全程单调、不截断，网点疏密仍然是亮度。
-  实测整屏平均亮度：关格栅 10.42、开格栅 7.37（不补偿只有 3.48）。
-- 三种荧光粉的整体亮度另有三个独立常量 `PHOSPHOR_R/G/B`（默认都是 1.0），想让格栅
-  偏暖/偏冷直接调这三个数；注意 `batch.setColor` 会把分量夹到 0..1，靠它提亮补挡光
-  做不到，亮度只能靠 `BEAM_GAIN`（全局增益）调。
-- 一条荧光条 = **一个设备像素**：显像管的栅距本来就远小于像素，跟着设计像素放大反而
-  会变成 9px 一根的粗彩虹。所以窗口/全屏越大，格栅越细、越接近实机观感。
-- 画在**所有风格化之后**（合成完再压）：真实显像管里格栅就贴在荧光粉前面，作用在最终
-  出射的光上。
-- **开格栅时自动切双线性平滑放大**（`PixelGameView.updateSampling()`）：最近邻会把每个
-  设计像素硬切成 3×3 的方块，三色荧光条被黑矩阵切得太利落，看着像贴了层彩膜；改成
-  双线性后相邻设计像素互相渗一点，荧光条也跟着柔化，才有电子束"浸染"进玻璃的感觉。
-  这条会盖过 F7 的像素化开关（格栅优先级更高），关掉格栅即恢复 F7 的最近邻。
+| 模式 | 观感 |
+|---|---|
+| 关 | 直通，最近邻像素，完全锐利 |
+| 扫描线 | 只压暗行尾，文字仍然清楚 |
+| 孔径格栅 | 纵向 RGB 条，每条 1 个设备像素宽 |
+| 扫描线+格栅 | 完整 CRT 观感（默认） |
 
-`docs/crt-grille.png` 是同一帧的左右对照（左：关；右：开，4 倍放大）；
-`docs/grille-smooth.png` 是"硬像素 vs 平滑浸染"的 4 倍对照。
+格栅图案可在设置页「格栅图案」切换：
+
+| 图案 | 实现 | 观感 |
+|---|---|---|
+| 栅条（默认） | `mod(x, 3)`，每条 1 个设备像素 | 纵向 RGB 细线，最像格栅2.txt 的启用版本 |
+| 荫罩 | `mod(x + y * (6 / u_scale), 6) / 2`，每条 2 个设备像素 | 斜向 RGB 纹，crt.txt 的 shadow mask；斜率随缩放自适应 |
+
+两种图案的 3× 实拍对照见 `docs/crt-grille-styles.png`（左栅条、右荫罩，都开着扫描线）。
+
+`docs/crt-modes.png` 是四种模式的对照（3× 全屏 1920×1080 上截取标题区域再放大）。`docs/crt-grille.png`、`docs/scanlines.png`
+是旧实现的图，只能参考观感——新实现的行/列周期都对齐设备像素，不会再出现旧图里那种
+随窗口变化的粗细。
 
 ## 架构差异（相对 JavaFX 原版）
 
@@ -344,6 +412,33 @@ ui.drawTexture(art, "gear");           // 按切片位置贴到画布上（透�
 `ui/battle.json` + `ui/battle.png` 是仓库里附的一份样例（12 个切片，其中 `card.slot.0` 故意挪到棋盘中央），
 配 `-Dsalvo.ase=ui/battle.json` 启动就能看到第一张卡换位置。
 
+### 没有 Aseprite 也能画（.uimap → JSON）
+
+Aseprite 的 JSON 没什么神秘的，就是「一张 sheet + 一张元素表」。`tools/UiSheetJson`
+把这份结构从 Aseprite 里解耦出来：用本 harness 的 `pixel_shader` / `pixel_art`、或者任何画图工具
+出图，再写一份元素清单就行。仓库里的 `ui/battle.uimap` 就是从 Aseprite 的导出结果反推的**完整样例**
+（41 个图层 / 20 个切片），两份 JSON 解析出来逐项相同。
+
+清单格式（`#` 和 `//` 都是注释，坐标就是屏幕坐标）：
+
+```
+image battle.png            # 可省，默认同名 .png
+layer img.gear              # 贴图图层：游戏认 img.<id> 前缀
+slice gear 94 6 18 18       # <id> x y w h —— 既是绘制区也是点击热区
+center info.box 2 2 2 2     # 可省，九宫格中心
+```
+
+转换（纯 JDK，无图像库、无 Aseprite；等价于 `ase-export.sh` 的产物）：
+
+```bash
+mvn -q -o exec:java -Dexec.mainClass=com.hysx.salvosequence.tools.UiSheetJson \
+    -Dexec.args="ui/battle.uimap"
+# 或 -Dstudio.map=ui/battle.uimap   -Dstudio.png=/ -Dstudio.out= 可覆盖
+```
+
+要点：生成的 JSON 默认落在 sheet 图旁边，因为游戏是**按 JSON 所在目录**去找 `meta.image` 的；
+越界、重名、拼错指令都会直接报错退出，不会写出一个游戏读不了的布局。
+
 > 没有 Aseprite、只想手摆热区的话，`D:\projects\uilab` 里还有个小工具能存 `.uilab`，
 > 游戏侧的 `core/UiLayout` 也照读——两条路并存，Aseprite 优先。
 
@@ -355,6 +450,8 @@ ui.drawTexture(art, "gear");           // 按切片位置贴到画布上（透�
 - `FlickerAudit`：文本闪烁逐帧导图
 - `SpriteExport` / `OutlineLab` / `ModuleLab` / `ShipLab` / `AudioSelfTest` / `AudioProbe`：素材导出与自检
 - `ase-export.sh`：把 `ui/*.aseprite` 导成界面数据（见上节）
+- `UiSheetJson`：把 `.uimap` 清单 + sheet PNG 写成同一份界面数据（不需要 Aseprite）
+- `AseUiProbe`：跳进战斗界面导设计像素图，核对美术稿到底有没有被用上
 
 ## 彩蛋：人物立绘（F12）
 

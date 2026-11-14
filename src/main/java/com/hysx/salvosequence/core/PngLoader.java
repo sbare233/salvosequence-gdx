@@ -47,12 +47,32 @@ public final class PngLoader {
             int h = pixmap.getHeight();
             java.nio.ByteBuffer rgba = pixmap.getPixels();
             int[] argb = new int[w * h];
-            for (int i = 0; i < argb.length; i++) {
-                int r = rgba.get(i * 4) & 0xFF;
-                int g = rgba.get(i * 4 + 1) & 0xFF;
-                int b = rgba.get(i * 4 + 2) & 0xFF;
-                int a = rgba.get(i * 4 + 3) & 0xFF;
-                argb[i] = (a << 24) | (r << 16) | (g << 8) | b;
+            Pixmap.Format format = pixmap.getFormat();
+            // 调色板 PNG（PNG8，mapback 那 1440 张）会被解成 RGB888：每像素 3 字节、没有 alpha。
+            // 以前这里写死按 4 字节读，一碰调色板图就 IndexOutOfBounds 越界。
+            int bpp = format == Pixmap.Format.RGBA8888 ? 4 : format == Pixmap.Format.RGB888 ? 3 : 0;
+            if (bpp == 4) {
+                for (int i = 0; i < argb.length; i++) {
+                    int r = rgba.get(i * 4) & 0xFF;
+                    int g = rgba.get(i * 4 + 1) & 0xFF;
+                    int b = rgba.get(i * 4 + 2) & 0xFF;
+                    int a = rgba.get(i * 4 + 3) & 0xFF;
+                    argb[i] = (a << 24) | (r << 16) | (g << 8) | b;
+                }
+            } else if (bpp == 3) {
+                for (int i = 0; i < argb.length; i++) {
+                    int r = rgba.get(i * 3) & 0xFF;
+                    int g = rgba.get(i * 3 + 1) & 0xFF;
+                    int b = rgba.get(i * 3 + 2) & 0xFF;
+                    argb[i] = 0xFF000000 | (r << 16) | (g << 8) | b;
+                }
+            } else {
+                // 其它格式（灰度、单通道 alpha 等）走慢路径，逐点问 Pixmap 要颜色。
+                for (int y = 0; y < h; y++) {
+                    for (int x = 0; x < w; x++) {
+                        argb[y * w + x] = pixmap.getPixel(x, y);
+                    }
+                }
             }
             return new Bitmap(argb, w, h);
         } finally {

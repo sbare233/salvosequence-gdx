@@ -1,60 +1,39 @@
 package com.hysx.salvosequence.ui;
 
 /**
- * 画质设置：CRT 扫描线与风格化滤镜。
- * <p>由设置面板读写，不再占用 F2/F3 功能键。</p>
+ * 画质设置：CRT 全屏滤镜模式、背景滤镜与诊断开关。
+ *
+ * <p>扫描线和孔径格栅是两种不同的显像管结构，观感也不一样：扫描线是<b>横向</b>的行消隐
+ * 暗带，孔径格栅是<b>纵向</b>的红/绿/蓝荧光条。这里用一个四态循环把两者分开，也可以叠加；
+ * 具体像素计算在 {@code PixelGameView} 的单个 CRT pass 里完成。</p>
+ *
+ * <p>格栅图案另有一项 {@link GrilleStyle}：格栅2.txt 的纵向栅条，或 crt.txt 的旋转荫罩
+ * （shadow mask）。玻璃桶形扭曲则用 {@link #screenWarp()} 单独开关，默认关；邻像素混合
+ * 用 {@link #bloom()} 单独开关，默认开。</p>
  */
 public final class VideoSettings {
 
-    /** 风格化：原画 / 模糊叠加 / 辉光（JavaFX Bloom）。 */
-    public enum Style {
-        RAW("原画", "RAW"),
-        BLUR("模糊", "BLUR"),
-        BLOOM("辉光", "BLOOM");
-
-        private final String label;
-        private final String labelEn;
-
-        Style(String label, String labelEn) {
-            this.label = label;
-            this.labelEn = labelEn;
-        }
-
-        public String label() {
-            return label;
-        }
-
-        public String labelEn() {
-            return labelEn;
-        }
-
-        public Style next() {
-            Style[] all = values();
-            return all[(ordinal() + 1) % all.length];
-        }
-    }
-
     /**
-     * 扫描线绘制时机（相对画质特效）。
+     * CRT 滤镜模式（按这个顺序循环）。
      *
      * <ul>
-     *   <li>{@link #AFTER_EFFECT}：先做风格化，最后画扫描线 —— 线条压在辉光/模糊之上，
-     *       锐利干净，是历史行为（默认）；</li>
-     *   <li>{@link #BEFORE_EFFECT}：扫描线先画进画面，再让风格化处理 —— 辉光的亮部
-     *       扩散与模糊会把线一起晕开，观感更像真实 CRT 的信号发光。</li>
+     *   <li>{@link #OFF} 关：直通，不跑 CRT pass。</li>
+     *   <li>{@link #SCANLINE} 扫描线：一个设计像素一行，行尾压暗一条设备像素线。</li>
+     *   <li>{@link #GRILLE} 孔径格栅：纵向荧光条，每条一个设备像素宽，三条一组（红/绿/蓝），
+     *       固定在设备像素上、不跟设计像素放大。</li>
+     *   <li>{@link #SCANLINE_GRILLE} 扫描线+格栅：两者叠加，最接近 crt.txt 右侧那三分之一的完整效果。</li>
      * </ul>
-     *
-     * <p>顺序由 {@code PixelGameView.render} 决定：模糊/原画风格直接在屏幕上调整
-     * 绘制顺序；辉光风格则把扫描线画进 gdx-vfx 的输入捕获，让后处理链真正"看到"线。</p>
      */
-    public enum ScanlineOrder {
-        AFTER_EFFECT("特效后", "AFTER FX"),
-        BEFORE_EFFECT("特效前", "BEFORE FX");
+    public enum CrtFilter {
+        OFF("关", "OFF"),
+        SCANLINE("扫描线", "SCANLINE"),
+        GRILLE("孔径格栅", "APERTURE GRILLE"),
+        SCANLINE_GRILLE("扫描线+格栅", "SCANLINE+GRILLE");
 
         private final String label;
         private final String labelEn;
 
-        ScanlineOrder(String label, String labelEn) {
+        CrtFilter(String label, String labelEn) {
             this.label = label;
             this.labelEn = labelEn;
         }
@@ -67,30 +46,42 @@ public final class VideoSettings {
             return labelEn;
         }
 
-        public ScanlineOrder next() {
-            ScanlineOrder[] all = values();
+        public CrtFilter next() {
+            CrtFilter[] all = values();
             return all[(ordinal() + 1) % all.length];
+        }
+
+        /** 这个模式要不要画横向扫描线。 */
+        public boolean hasScanline() {
+            return this == SCANLINE || this == SCANLINE_GRILLE;
+        }
+
+        /** 这个模式要不要画纵向孔径格栅。 */
+        public boolean hasGrille() {
+            return this == GRILLE || this == SCANLINE_GRILLE;
         }
     }
 
     /**
-     * 扫描线的形状。
+     * 格栅图案：同样是红/绿/蓝三色荧光条，排列方式不同。
      *
      * <ul>
-     *   <li>{@link #STRAIGHT}：一条贯穿整行的黑条，规整、最像"信号层面的行消隐"。</li>
-     *   <li>{@link #JAGGED}：把黑条切成一个个方块、相邻两块上下错开半条高度，
-     *       形成锯齿/错位感。真实显像管受会聚误差与荫罩网格影响，行与行之间本来
-     *       就不是严丝合缝的一条直线。</li>
+     *   <li>{@link #APERTURE} 栅条：格栅2.txt 里启用的孔径格栅，纵向三条一组，
+     *       每条一个设备像素宽，亮暗配比 1.5 / 0.5。</li>
+     *   <li>{@link #SHADOW} 荫罩：crt.txt 的旋转 shadow mask——格栅斜着走
+     *       （{@code x + y * (6 / u_scale)}），一组 6 个设备像素、每条 2 像素宽，
+     *       放大看是斜纹。斜率跟着 2×/3× 走，一个设计像素行正好一组，
+     *       3× 时不会出现奇偶行差半组的错位。</li>
      * </ul>
      */
-    public enum ScanlineShape {
-        STRAIGHT("直条", "STRAIGHT"),
-        JAGGED("锯齿", "JAGGED");
+    public enum GrilleStyle {
+        APERTURE("栅条", "APERTURE GRILLE"),
+        SHADOW("荫罩", "SHADOW MASK");
 
         private final String label;
         private final String labelEn;
 
-        ScanlineShape(String label, String labelEn) {
+        GrilleStyle(String label, String labelEn) {
             this.label = label;
             this.labelEn = labelEn;
         }
@@ -103,14 +94,14 @@ public final class VideoSettings {
             return labelEn;
         }
 
-        public ScanlineShape next() {
-            ScanlineShape[] all = values();
+        public GrilleStyle next() {
+            GrilleStyle[] all = values();
             return all[(ordinal() + 1) % all.length];
         }
     }
 
     /**
-     * 背景滤镜：实时 3D 背景（星云/恒星/星球/脉冲星）出图后用哪种方式"像素化"。
+     * 背景滤镜：实时 3D 背景（星云/恒星/星球/脉冲星）出图后用哪种方式“像素化”。
      *
      * <ul>
      *   <li>{@link #BAYER} 拜耳：项目原有的 {@code BayerPixelator}，8×8 网点有序抖动，
@@ -145,19 +136,26 @@ public final class VideoSettings {
         }
     }
 
-    private static Style style = Style.BLUR;
-    private static boolean scanlines = true;
-    /**
-     * 孔径格栅（aperture grille）：荫栅式显像管（Sony Trinitron 一系）在玻璃后面
-     * 竖着的 RGB 荧光条，条纹之间是黑矩阵。和扫描线是同一个年代的两件"屏幕物理
-     * 纹理"——扫描线是行，格栅是列，所以代码里并列成两个开关，可以同时开。
-     *
-     * <p>与荫罩（shadow mask，孔洞式）的区别在图形上：孔径格栅是<b>连续竖条</b>，
-     * 荫罩是<b>点状孔</b>；这里画竖条，因为竖条在小尺寸像素画布上不会产生摩尔纹。</p>
-     */
-    private static boolean apertureGrille = false;
-    private static ScanlineOrder scanlineOrder = ScanlineOrder.BEFORE_EFFECT;
-    private static ScanlineShape scanlineShape = ScanlineShape.STRAIGHT;
+    /** 当前 CRT 模式：默认扫描线 + 孔径格栅（crt.txt 第三块的完整效果）。 */
+    private static CrtFilter crtFilter = CrtFilter.OFF;
+    /** 最近一次开着的模式；从"关"切回来时恢复它，而不是一律回到最轻的扫描线。 */
+    private static CrtFilter lastCrtOn = CrtFilter.SCANLINE_GRILLE;
+    /** 格栅图案：默认纵向栅条（格栅2.txt 启用的那个版本）。 */
+    private static GrilleStyle grilleStyle = GrilleStyle.APERTURE;
+    /** 显像管玻璃的桶形扭曲；独立开关，默认关，关掉后画面四边是直的。 */
+    private static boolean screenWarp = false;
+    /** 邻像素混合（原「辉光弥散」）：按设备像素在设计像素里的位置给邻居加权，越靠边权重越大，
+     *  中心几乎不混；横向始终参与，纵向只在格栅开着时参与。k 随缩放归一化，亮度守恒。 */
+    private static boolean bloom = true;
+    /** 混合强度 k 的系数：shader 里 {@code float k = u_mix * s * s}（u_mix 既是开关也是
+     *  这个系数，关时传 0 走直通）。1.0 是调参时的原始手感，调大往中心收（边缘渗色更少、
+     *  更锐），调小往邻居摊（更糊）。设置页有滑条可拖。 */
+    private static double mixK = 1.0;
+    /** 滑条量程：0.25 已经很糊，3.0 几乎只剩像素本身。 */
+    public static final double MIX_K_MIN = 0.25;
+    public static final double MIX_K_MAX = 3.0;
+    /** 滑条最小步进（键盘一次 ±STEP，拖鼠标也吸附到这个格）。 */
+    public static final double MIX_K_STEP = 0.05;
     private static BackdropFilter backdropFilter = BackdropFilter.BAYER;
     // 诊断开关（F7/F8）：像素化上屏（关 = Linear 双线性，不放大像素）与拜耳抖动。
     private static boolean pixelated = true;
@@ -170,71 +168,103 @@ public final class VideoSettings {
     private VideoSettings() {
     }
 
-    public static Style style() {
-        return style;
+    public static CrtFilter crtFilter() {
+        return crtFilter;
     }
 
-    public static void setStyle(Style value) {
-        style = value == null ? Style.RAW : value;
+    public static void setCrtFilter(CrtFilter value) {
+        crtFilter = value == null ? CrtFilter.OFF : value;
+        if (crtFilter != CrtFilter.OFF) {
+            lastCrtOn = crtFilter;
+        }
     }
 
-    public static Style cycleStyle() {
-        style = style.next();
-        return style;
+    /** 设置页按一次切换：关 → 扫描线 → 孔径格栅 → 扫描线+格栅 → 关。 */
+    public static CrtFilter cycleCrtFilter() {
+        setCrtFilter(crtFilter.next());
+        return crtFilter;
     }
 
+    /** 旧接口兼容：任意 CRT 效果开着就返回 true（工具/旧调用方用）。 */
     public static boolean scanlines() {
-        return scanlines;
+        return crtFilter != CrtFilter.OFF;
     }
 
+    /** 旧接口兼容：false 关掉整个 CRT；true 恢复上一次开着的模式。 */
     public static void setScanlines(boolean value) {
-        scanlines = value;
+        setCrtFilter(value ? lastCrtOn : CrtFilter.OFF);
     }
 
+    /** 旧接口兼容：在"关"和上一次开着的模式之间切换。 */
     public static boolean toggleScanlines() {
-        scanlines = !scanlines;
-        return scanlines;
+        setScanlines(!scanlines());
+        return scanlines();
     }
 
-    /** 孔径格栅是否叠加（与扫描线并列的显像管物理纹理，默认关）。 */
-    public static boolean apertureGrille() {
-        return apertureGrille;
+    public static GrilleStyle grilleStyle() {
+        return grilleStyle;
     }
 
-    public static void setApertureGrille(boolean value) {
-        apertureGrille = value;
+    public static void setGrilleStyle(GrilleStyle value) {
+        grilleStyle = value == null ? GrilleStyle.APERTURE : value;
     }
 
-    public static boolean toggleApertureGrille() {
-        apertureGrille = !apertureGrille;
-        return apertureGrille;
+    /** 设置页按一次切换：栅条 ⇄ 荫罩。 */
+    public static GrilleStyle cycleGrilleStyle() {
+        grilleStyle = grilleStyle.next();
+        return grilleStyle;
     }
 
-    /** 扫描线画在风格化特效之前还是之后。 */
-    public static ScanlineOrder scanlineOrder() {
-        return scanlineOrder;
+    /** 桶形扭曲开关；关掉后 CRT 只做扫描线/格栅，不再弯画面。 */
+    public static boolean screenWarp() {
+        return screenWarp;
     }
 
-    public static void setScanlineOrder(ScanlineOrder value) {
-        scanlineOrder = value == null ? ScanlineOrder.AFTER_EFFECT : value;
+    public static void setScreenWarp(boolean value) {
+        screenWarp = value;
     }
 
-    public static ScanlineOrder cycleScanlineOrder() {
-        scanlineOrder = scanlineOrder.next();
-        return scanlineOrder;
+    public static boolean toggleScreenWarp() {
+        screenWarp = !screenWarp;
+        return screenWarp;
     }
 
-    public static ScanlineShape scanlineShape() {
-        return scanlineShape;
+    /** 邻像素混合开关；关掉后 CRT 只保留扫描线/格栅的硬边，像素之间不再混色。 */
+    public static boolean bloom() {
+        return bloom;
     }
 
-    public static void setScanlineShape(ScanlineShape value) {
-        scanlineShape = value == null ? ScanlineShape.STRAIGHT : value;
+    public static void setBloom(boolean value) {
+        bloom = value;
     }
 
-    public static ScanlineShape cycleScanlineShape() {
-        scanlineShape = scanlineShape.next();
-        return scanlineShape;
+    public static boolean toggleBloom() {
+        bloom = !bloom;
+        return bloom;
+    }
+
+    /** 混合强度系数 k（shader 里乘在 (2*scale/(scale+1))² 上）。 */
+    public static double mixK() {
+        return mixK;
+    }
+
+    /** 设定混合强度，钳到量程并按步进吸附；返回吸附后的值。 */
+    public static double setMixK(double value) {
+        double snapped = Math.round(value / MIX_K_STEP) * MIX_K_STEP;
+        snapped = Math.max(MIX_K_MIN, Math.min(MIX_K_MAX, snapped));
+        // 0.05 这类小数在 double 里是 0.30000000000000004，统一收成两位
+        mixK = Math.round(snapped * 100.0) / 100.0;
+        return mixK;
+    }
+
+    /** 键盘 ←→ 一次改一格。 */
+    public static double nudgeMixK(double delta) {
+        return setMixK(mixK + delta);
+    }
+
+    /** 回到调参时的原始手感。 */
+    public static double resetMixK() {
+        return setMixK(1.0);
     }
 
     public static BackdropFilter backdropFilter() {

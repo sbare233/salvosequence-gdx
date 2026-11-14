@@ -8,6 +8,7 @@ import com.badlogic.gdx.graphics.GL20;
 import com.badlogic.gdx.graphics.Pixmap;
 import com.badlogic.gdx.graphics.Texture;
 import com.badlogic.gdx.graphics.glutils.ShaderProgram;
+import com.badlogic.gdx.utils.GdxRuntimeException;
 import com.hysx.salvosequence.core.CanvasBuffer;
 import com.hysx.salvosequence.core.Palette;
 import com.hysx.salvosequence.core.PixelScale;
@@ -30,12 +31,12 @@ import java.util.Map;
  * </ol>
  *
  * <p>界面切换、热区、扫描线、调试读数全部在 {@link ScreenManager}，这里不掺业务。
- * 原版的辉光层（GaussianBlur + SCREEN 叠加）与 Bloom 在这里用同一个片元着色器复刻。</p>
+ * 最终上屏只走一个 CRT pass（扫描线 + 孔径格栅），不再有模糊/辉光后处理链。</p>
  */
 public final class PixelGameView extends ApplicationAdapter {
 
     /** 构建标记：视觉口径改动时更新，用于排查"跑的是不是最新构建"。 */
-    public static final String BUILD_TAG = "2026-11-05-live-backdrop-v39";
+    public static final String BUILD_TAG = "2026-11-13-crt-axis-mix-v47";
 
     /** 设计分辨率。 */
     public static final int DESIGN_WIDTH = 640;
@@ -55,81 +56,13 @@ public final class PixelGameView extends ApplicationAdapter {
     private final ByteBuffer rgbaBytes = ByteBuffer.allocateDirect(DESIGN_WIDTH * DESIGN_HEIGHT * 4);
 
     private com.badlogic.gdx.graphics.g2d.SpriteBatch batch;
-    private Texture whitePixel;
-    /** 孔径格栅的 3x1 图案纹理（红/绿/蓝各一列），横向 Repeat 平铺。 */
-    private Texture grilleTexture;
-    /** 锯齿扫描线的 3xPeriod 循环纹理（每列一根荧光条各错开一行）。 */
-    private Texture scanlineTexture;
-    /** 上面那张纹理对应的扫描周期（设备像素），换分辨率时重建。 */
-    private int scanlineTexPeriod = -1;
-    /**
-     * 平滑缩放：开孔径格栅时自动打开，让放大时的采样从"最近邻硬像素"变成双线性，
-     * 荧光条的三种颜色互相浸染，像真实荫栅管的高频亮点在玻璃里晕开。
-     */
-    private boolean smoothScale;
-    /** 束流补偿用的着色器（开格栅时上屏前乘增益）。 */
-    private ShaderProgram beamShader;
-    private ShaderProgram glowShader;
-    /** 辉光着色器里当前帧的模糊半径（uv 单位），随视口刷新。 */
-    private float blurRadiusUv = 3f / (DESIGN_WIDTH * 3f);
+    /** 上屏 CRT shader（扫描线 + 荫栅，一次采样完成）。 */
+    private ShaderProgram crtShader;
 
-    // ---- 辉光（BLOOM）：gdx-vfx BloomEffect（开源后处理链，Apache 2.0）----
-    // 链路：亮部阈值 -> 多 pass 高斯模糊 -> 原画/辉光合成。下面这组参数可直接调观感。
-    /** 亮度阈值：高于它的像素才进辉光（0~1）。0.2 = 暗部也发光（用户口径）。 */
-    private static final float BLOOM_THRESHOLD = 0.2f;
-    /** 高斯模糊 pass 数：多 pass 迭代让光晕铺得更开。 */
-    private static final int BLOOM_BLUR_PASSES = 2;
-    /** 单 pass 模糊强度（像素偏移量）。 */
-    private static final float BLOOM_BLUR_AMOUNT = 2.0f;
-    /** 辉光层叠加强度。 */
-    private static final float BLOOM_INTENSITY = 1.3f;
-    /** 原画层保留强度（1 = 原样）。 */
-    private static final float BLOOM_BASE_INTENSITY = 1.0f;
-
-    /** 模糊层的叠加强度（SCREEN 混合前乘在模糊结果上；1 = 全强度）。 */
-    private static final float BLUR_STRENGTH = 0.25f;
-    /**
-     * 孔径格栅里"不属于这一列的两个通道"保留多少亮度。
-     *
-     * <p>取 0 就是物理上的真实情况：每条荧光粉只发自己那一种颜色，红条只留 R、
-     * G/B 直接归零，三列拼起来才是原来的颜色。想让它柔和一点（不至于太暗、条纹
-     * 太硬）可以调到 0.1~0.2，等于让"黑矩阵"漏一点光。</p>
-     */
-    private static final float GRILLE_PASS = 0f;
-    /** 扫描线黑条的透明度：显像管的行间隙只是"没被扫到"，不该是一层黑纱。 */
-    private static final float SCANLINE_DARK = 0.5f;
-    /**
-     * 束流补偿：格栅把每个像素的另外两个通道直接归零，等于只剩 1/3 的光，
-     * 真实显像管是靠加大束流补回来的。
-     *
-     * <p><b>必须用软拐点而不是硬乘法</b>：拜耳抖动的网点本身就在中灰附近，
-     * 直接乘 3 会把整片网点顶到 255，亮度差被抹平——星系会糊成一坨白斑。
-     * 这里用 x*g/(1+x*(g-1))（Reinhard 型曲线）：暗部按 g 放大、亮部渐近到 1，
-     * 全程单调不截断，网点疏密仍然代表亮度。</p>
-     */
-    private static final float BEAM_GAIN = 3.0f;
-    /**
-     * 三支电子枪/三种荧光粉的相对亮度（红、绿、蓝）。绿粉最亮、蓝粉最暗，
-     * 这里留成三个独立常量：想让格栅偏暖/偏冷，直接调这三个数。
-     */
-    private static final float PHOSPHOR_R = 1.00f;
-    private static final float PHOSPHOR_G = 1.00f;
-    private static final float PHOSPHOR_B = 1.00f;
-
-
-    /** 屏幕空间投影（0..w, 0..h，GL 原点左下）：正常绘制与扫描线都用它。 */
+    /** 屏幕空间投影（0..w, 0..h，GL 原点左下）：CRT 上屏与输入换算共用。 */
     private final com.badlogic.gdx.math.Matrix4 screenMatrix =
             new com.badlogic.gdx.math.Matrix4();
-    /** 设计空间投影（0..640, 0..360）：后处理捕获时用，让 VFX 链在 640x360 上跑。 */
-    private final com.badlogic.gdx.math.Matrix4 designMatrix =
-            new com.badlogic.gdx.math.Matrix4().setToOrtho2D(
-                    0, 0, DESIGN_WIDTH, DESIGN_HEIGHT);
-
-    private com.crashinvaders.vfx.VfxManager vfxManager;
-    private com.crashinvaders.vfx.effects.BloomEffect bloomEffect;
-
-    /** 当前生效的画质风格（设置面板里改，每帧检测变化）。 */
-    private VideoSettings.Style appliedStyle;
+    private long profTick, profFrame, profUpload, profUpdate, profDraw;
     /** 当前生效的像素化开关（F7 切换时换纹理过滤）。 */
     private boolean appliedPixelated = true;
     private long frameCount;
@@ -143,7 +76,6 @@ public final class PixelGameView extends ApplicationAdapter {
     private long smokeStartNanos;
     /** 性能剖析：-Dsalvosequence.profile=true 时按段累加耗时（冒烟结束打印）。 */
     private final boolean profiling = Boolean.getBoolean("salvosequence.profile");
-    private long profTick, profFrame, profScan, profVfx, profUpload, profUpdate, profDraw;
     /** 桌面端直接按 GL_BGRA 上传像素（安卓 GLES2 不保证支持，退回逐字节转换）。 */
     private java.nio.IntBuffer intPixels;
     private boolean useBgraUpload;
@@ -173,57 +105,50 @@ public final class PixelGameView extends ApplicationAdapter {
         useBgraUpload = Gdx.app.getType() != com.badlogic.gdx.Application.ApplicationType.Android;
         buffer.art().attachSink(new FrameSink());
 
-        whitePixel = makeWhitePixel();
-        grilleTexture = makeGrilleTexture();
-        beamShader = makeBeamShader();
-        glowShader = makeGlowShader();
-
-        vfxManager = new com.crashinvaders.vfx.VfxManager(Pixmap.Format.RGBA8888);
-        bloomEffect = new com.crashinvaders.vfx.effects.BloomEffect();
-        bloomEffect.setThreshold(BLOOM_THRESHOLD);
-        bloomEffect.setBlurPasses(BLOOM_BLUR_PASSES);
-        bloomEffect.setBlurAmount(BLOOM_BLUR_AMOUNT);
-        bloomEffect.setBloomIntensity(BLOOM_INTENSITY);
-        bloomEffect.setBaseIntensity(BLOOM_BASE_INTENSITY);
-        bloomEffect.disableBlending();
-        vfxManager.addEffect(bloomEffect);
-        // 【性能】后处理链固定跑 640x360，而不是窗口/全屏分辨率：Bloom 的
-        // 阈值->2 pass 高斯->合成一共 7 趟全屏绘制，1920x1080 下每帧要摸 2M 像素 x7，
-        // 核显上占掉 1/4 的 GPU；换成 640x360 后像素数少 9 倍，最后由
-        // renderToScreen(0,0,w,h) 最近邻放大到整屏（整数倍缩放，像素依旧锐利）。
-        vfxManager.resize(DESIGN_WIDTH, DESIGN_HEIGHT);
-        vfxManager.setEffectTextureParams(
-                com.badlogic.gdx.graphics.Texture.TextureWrap.ClampToEdge,
-                com.badlogic.gdx.graphics.Texture.TextureWrap.ClampToEdge,
-                com.badlogic.gdx.graphics.Texture.TextureFilter.Nearest,
-                com.badlogic.gdx.graphics.Texture.TextureFilter.Nearest);
+        crtShader = makeCrtShader();
 
         Gdx.input.setInputProcessor(new ViewInput());
 
-        // 调试用：-Dsalvosequence.style=RAW|BLUR|BLOOM 可强制画质风格（截图核对后处理链）
-        String forcedStyle = System.getProperty("salvosequence.style");
-        if (forcedStyle != null && !forcedStyle.trim().isEmpty()) {
+        // 调试用：-Dsalvosequence.crt=OFF|SCANLINE|GRILLE|SCANLINE_GRILLE 直接选滤镜；
+        // 旧属性 -Dsalvosequence.scanlines=true|false 仍兼容（true = 完整 CRT）。
+        String forcedCrt = System.getProperty("salvosequence.crt");
+        if (forcedCrt != null && !forcedCrt.trim().isEmpty()) {
+            String wanted = forcedCrt.trim().toUpperCase(java.util.Locale.ROOT)
+                    .replace('-', '_').replace('+', '_').replace(' ', '_');
             try {
-                VideoSettings.setStyle(VideoSettings.Style.valueOf(
-                        forcedStyle.trim().toUpperCase(java.util.Locale.ROOT)));
-            } catch (IllegalArgumentException ignored) {
-                // 名字写错就按默认走，不打断启动
+                VideoSettings.setCrtFilter(VideoSettings.CrtFilter.valueOf(wanted));
+            } catch (IllegalArgumentException unknown) {
+                System.out.println("[crt] 未知模式 " + forcedCrt
+                        + "，可用 OFF/SCANLINE/GRILLE/SCANLINE_GRILLE");
+            }
+        } else {
+            String forcedScanlines = System.getProperty("salvosequence.scanlines");
+            if (forcedScanlines != null && !forcedScanlines.trim().isEmpty()) {
+                VideoSettings.setScanlines(Boolean.parseBoolean(forcedScanlines.trim()));
             }
         }
-        if (Boolean.getBoolean("salvosequence.grille")) {
-            VideoSettings.setApertureGrille(true);
-        }
-        // 调试用：-Dsalvosequence.scanlineShape=STRAIGHT|JAGGED 强制扫描线形状
-        String forcedShape = System.getProperty("salvosequence.scanlineShape");
-        if (forcedShape != null && !forcedShape.trim().isEmpty()) {
+        // 调试用：-Dsalvosequence.grille=APERTURE|SHADOW、-Dsalvosequence.warp=true|false、
+        // -Dsalvosequence.mix=true|false（旧名 bloom 仍兼容）
+        String forcedGrille = System.getProperty("salvosequence.grille");
+        if (forcedGrille != null && !forcedGrille.trim().isEmpty()) {
+            String wanted = forcedGrille.trim().toUpperCase(java.util.Locale.ROOT)
+                    .replace('-', '_').replace('+', '_').replace(' ', '_');
             try {
-                VideoSettings.setScanlineShape(VideoSettings.ScanlineShape.valueOf(
-                        forcedShape.trim().toUpperCase(java.util.Locale.ROOT)));
-            } catch (IllegalArgumentException ignored) {
-                // 名字写错就按默认走
+                VideoSettings.setGrilleStyle(VideoSettings.GrilleStyle.valueOf(wanted));
+            } catch (IllegalArgumentException unknown) {
+                System.out.println("[crt] 未知格栅图案 " + forcedGrille
+                        + "，可用 APERTURE/SHADOW");
             }
         }
-        applyStyle(VideoSettings.style());
+        String forcedWarp = System.getProperty("salvosequence.warp");
+        if (forcedWarp != null && !forcedWarp.trim().isEmpty()) {
+            VideoSettings.setScreenWarp(Boolean.parseBoolean(forcedWarp.trim()));
+        }
+        String forcedBloom = System.getProperty("salvosequence.mix",
+                System.getProperty("salvosequence.bloom"));
+        if (forcedBloom != null && !forcedBloom.trim().isEmpty()) {
+            VideoSettings.setBloom(Boolean.parseBoolean(forcedBloom.trim()));
+        }
         onViewportChanged();
         smokeStartNanos = System.nanoTime();
         System.out.println("[build] " + BUILD_TAG);
@@ -253,84 +178,8 @@ public final class PixelGameView extends ApplicationAdapter {
         double ox = pixelScale.offsetX();
         double oy = h - pixelScale.offsetY() - ch;   // GL 坐标原点在左下，设计 y 轴向下
 
-        // 扫描线时机：默认"特效后"在风格化之后压线；"特效前"则先画进画面，
-        // 让辉光/模糊把线一起处理。
-        boolean scanlinesOn = screens.isScanlineEnabled();
-        boolean scanBefore = scanlinesOn
-                && VideoSettings.scanlineOrder() == VideoSettings.ScanlineOrder.BEFORE_EFFECT;
-        boolean bloomOn = appliedStyle == VideoSettings.Style.BLOOM && vfxManager != null;
-        // 辉光模式下后处理在 640x360 上跑，屏幕级的 2px 扫描线没法画进捕获
-        // （会变成 6px 粗线），所以"特效前"在这种模式下等价于"特效后"。
-        boolean scanAfter = scanlinesOn && (!scanBefore || bloomOn);
-
-        // 1) 原画（所有风格共用的底）。【移植版关键修复】设计缓冲不是不透明
-        // 图像：nebula 背景只含星点（大片 alpha=0），盘面盘缘 alpha 仅 8~160，
-        // 必须开混合按 alpha 上屏。此前 disableBlending 把 alpha 整个丢弃，
-        // 盘缘以满亮度 rgb 直写帧缓冲 = 实心盘 + 图层边界切边（断崖）。
-        // JavaFX 原版合成同一份缓冲时 alpha 被正确处理，故原版无此现象。
-        boolean bloomActive = appliedStyle == VideoSettings.Style.BLOOM && vfxManager != null;
-        // 辉光模式下这一层只是铺底，预压留给输入捕获层做（两层相加，压两次会过暗）
-        drawFrame(ox, oy, cw, ch, !bloomActive);
-        if (profiling) { profFrame += System.nanoTime() - t0; t0 = System.nanoTime(); }
-
-        // 1b) 像素化开关（F7）：Nearest 放大 <-> Linear 平滑，纹理过滤热切换
-        updateSampling();
-
-        // 1c) 特效前：扫描线先压在原画上，后面的风格化把线一起处理。
-        //     辉光例外——它的合成输出叠在原画之上（本游戏未启用 vfx 的 blendingEnabled，
-        //     不会整屏覆盖），扫描线改画进后处理的输入捕获（见 2），
-        //     否则同一道线会在屏幕上被压暗两次。
-        VideoSettings.Style style = appliedStyle;
-        if (scanBefore && !bloomActive) {
-            drawScanlines(ox, oy, cw, ch, scale);
-        }
-
-        // 2) 画质风格。辉光走 gdx-vfx 开源后处理链（阈值->多 pass 高斯->合成）；
-        //    模糊走单 pass 高斯 + SCREEN 叠加（原画保留在下面一层）。
-        if (bloomActive) {
-            vfxManager.cleanUpBuffers();
-            vfxManager.beginInputCapture();
-            // 捕获缓冲是 640x360：换成设计空间投影按 1:1 画，最后由 renderToScreen 放大
-            batch.setProjectionMatrix(designMatrix);
-            drawFrame(0, 0, DESIGN_WIDTH, DESIGN_HEIGHT, true);
-            batch.setProjectionMatrix(screenMatrix);
-            vfxManager.endInputCapture();
-            vfxManager.applyEffects();
-        if (profiling) { profVfx += System.nanoTime() - t0; t0 = System.nanoTime(); }
-            // 全屏放大：GL 直接拉伸到整个窗口（整数倍时像素仍然对齐）
-            vfxManager.renderToScreen(0, 0, w, h);
-        } else {
-            // 2a) 模糊风格：同一帧高斯模糊后 SCREEN 叠加（原画底已在步骤 1 画好）。
-            //     注意：混合函数必须走 batch.setBlendFunction（begin() 会用它重设 GL 状态），
-            //     直接 glBlendFunc 会被 begin() 里的默认 alpha 混合覆盖——第二遍就会
-            //     把原画整个替换掉，表现成"模糊没有叠加原画"。
-            if (style == VideoSettings.Style.BLUR && glowShader != null) {
-                glowShader.bind();
-                glowShader.setUniformf("u_texel", blurRadiusUv, blurRadiusUv);
-                glowShader.setUniformf("u_threshold", -1f);
-                glowShader.setUniformf("u_gain", BLUR_STRENGTH);
-                // SCREEN：src + dst - src*dst -> (GL_ONE, GL_ONE_MINUS_SRC_COLOR)
-                batch.setBlendFunction(GL20.GL_ONE, GL20.GL_ONE_MINUS_SRC_COLOR);
-                batch.setShader(glowShader);
-                batch.enableBlending();
-                batch.begin();
-                batch.draw(frameTexture, (float) ox, (float) oy, (float) cw, (float) ch);
-                batch.end();
-                batch.setShader(null);
-                batch.setBlendFunction(GL20.GL_SRC_ALPHA, GL20.GL_ONE_MINUS_SRC_ALPHA);
-            }
-        }
-
-        // 3) 特效后（默认）：扫描线最后画，压在风格化结果之上，线条锐利。
-        if (scanAfter) {
-            drawScanlines(ox, oy, cw, ch, scale);
-        }
-
-        // 4) 孔径格栅：荫栅式显像管的垂直 RGB 荧光条，压在最上层。真实显像管里
-        //    格栅就在玻璃后面、作用在最终出射的光上，所以这里也画在合成之后。
-        if (screens.isApertureGrilleEnabled()) {
-            drawApertureGrille(ox, oy, cw, ch, scale);
-        }
+        // 一次上屏：CRT 扫描线 + 荫栅全部在片元着色器里完成。
+        drawCrt(ox, oy, cw, ch);
 
         // 冒烟截图：整帧画完再抓默认帧缓冲（y 翻转后写盘），核对后处理链输出
         if (smokeShotPending) {
@@ -348,242 +197,158 @@ public final class PixelGameView extends ApplicationAdapter {
         }
     }
 
-    /** 模糊/辉光时对输入的预压：先把底画压暗压平，后处理才不会糊成一片白。 */
-    private static final float EFFECT_BRIGHTNESS = 0.8f;
-    private static final float EFFECT_CONTRAST = 0.9f;
-    /** 孔径格栅会挡掉约 2/3 的通道，开格栅时再压一道亮度。 */
-    private static final float GRILLE_BRIGHTNESS = 0.9f;
-
-    /**
-     * 原画上屏：整幅设计缓冲按 alpha 混合铺到视口里的目标矩形。
-     *
-     * <p>上屏前按画质风格做一次"输入调色"：模糊/辉光会整体提亮并摊开，
-     * 先把输入压到 80% 亮度、90% 对比，亮部不会顶到白；孔径格栅再挡掉
-     * 2/3 的通道，所以再压 10% 亮度。任一系数不为 1 时走 {@link #beamShader}
-     * 做一次 contrast → brightness → 束流软膝，省一次额外全屏 pass。</p>
-     */
+    /** 原画上屏：整幅设计缓冲按 alpha 混合铺到视口目标矩形（CRT 关闭时的直通路径）。 */
     private void drawFrame(double ox, double oy, double cw, double ch) {
-        drawFrame(ox, oy, cw, ch, true);
-    }
-
-    /**
-     * @param grade 是否叠加"特效前输入预压"。辉光模式下这一帧会画两次（屏幕铺底层 +
-     *              后处理的输入捕获层），两层在屏幕上相加，预压只能压一次，否则
-     *              0.8×0.8 会把画面直接压到一半亮度；所以铺底层传 false、捕获层传 true。
-     */
-    private void drawFrame(double ox, double oy, double cw, double ch, boolean grade) {
-        boolean grille = screens.isApertureGrilleEnabled();
-        float bright = 1.0f;
-        float contrast = 1.0f;
-        if (grade
-                && (appliedStyle == VideoSettings.Style.BLUR
-                || appliedStyle == VideoSettings.Style.BLOOM)) {
-            bright *= EFFECT_BRIGHTNESS;
-            contrast *= EFFECT_CONTRAST;
-        }
-        if (grille) {
-            bright *= GRILLE_BRIGHTNESS;
-        }
-        boolean graded = beamShader != null
-                && (grille || Math.abs(bright - 1.0f) > 1.0e-4f || Math.abs(contrast - 1.0f) > 1.0e-4f);
-        if (graded) {
-            beamShader.bind();
-            // 格栅的束流增益只在真的开格栅时给，否则 1.0 = 直通
-            beamShader.setUniformf("u_gain", grille ? BEAM_GAIN : 1.0f);
-            beamShader.setUniformf("u_bright", bright);
-            beamShader.setUniformf("u_contrast", contrast);
-            batch.setShader(beamShader);
-        } else {
-            batch.setShader(null);
-        }
+        batch.setShader(null);
         batch.enableBlending();
         batch.begin();
         batch.draw(frameTexture, (float) ox, (float) oy, (float) cw, (float) ch);
         batch.end();
-        batch.setShader(null);
-    }
-
-    /** 输入调色 + 束流增益：contrast → brightness → 软膝增益，一次全屏搞定。 */
-    private static ShaderProgram makeBeamShader() {
-        String vertex = "attribute vec4 a_position;\n"
-                + "attribute vec2 a_texCoord0;\n"
-                + "uniform mat4 u_projTrans;\n"
-                + "varying vec2 v_tex;\n"
-                + "void main() {\n"
-                + "  v_tex = a_texCoord0;\n"
-                + "  gl_Position = u_projTrans * a_position;\n"
-                + "}\n";
-        String fragment = "#ifdef GL_ES\n"
-                + "precision mediump float;\n"
-                + "#endif\n"
-                + "varying vec2 v_tex;\n"
-                + "uniform sampler2D u_texture;\n"
-                + "uniform float u_gain;\n"
-                + "uniform float u_bright;\n"
-                + "uniform float u_contrast;\n"
-                + "void main() {\n"
-                + "  vec4 c = texture2D(u_texture, v_tex);\n"
-                + "  vec3 v = (c.rgb - 0.5) * u_contrast + 0.5;\n"
-                + "  v = clamp(v * u_bright, 0.0, 1.0);\n"
-                + "  vec3 g = v * u_gain / (vec3(1.0) + v * (u_gain - 1.0));\n"
-                + "  gl_FragColor = vec4(g, c.a);\n"
-                + "}\n";
-        return new ShaderProgram(vertex, fragment);
     }
 
     /**
-     * CRT 扫描线（屏幕空间）：每个设计像素压暗下半像素。
+     * 单个全屏 CRT pass：横向扫描线 + 纵向孔径格栅。
      *
-     * <p>和内容走同一个 batch —— 同一张投影矩阵、同一个坐标系，等价 JavaFX 版
-     * "扫描线画进同一张画布"。【关键修复】此前走 ShapeRenderer，而它的
-     * begin() 只在 setProjectionMatrix() 时才重建组合矩阵（matrixDirty 标志），
-     * resize() 里原地改 getProjectionMatrix() 对它完全不可见，于是扫描线
-     * 永远停在 create() 时的全屏投影里 —— 窗口缩小后只剩"左下角"有扫描线
-     * （内容却是对的，因为 SpriteBatch 每帧按值重读投影矩阵）。</p>
+     * <p><b>像素口径</b>：{@code u_res} 就是设计分辨率，一个纹素 = 一个设计像素；
+     * 扫描线周期因此恰好是一行设计像素。旧实现把 y 相位乘 0.3333，变成 3 个设计像素
+     * 才一条扫描线，还把 x/y 的相位混在同一个 Dist 里，所以画面上是粗横纹 + 文字发虚。</p>
      *
-     * <p>周期跟随缩放：一个设计像素一暗一明。低倍率时周期下限 2 像素，
-     * 保证每行至少压暗 1 像素，不会因为缩得太小而消失。</p>
+     * <p><b>两种效果分开</b>：{@code u_scan} 控制行消隐暗带（横向），
+     * {@code u_grille} 控制红/绿/蓝荧光条（纵向），来自 {@link VideoSettings.CrtFilter}。
+     * 格栅固定在设备像素上：一条荧光条 = 1 个设备像素，三条一组；不跟设计像素放大，
+     * 否则 3× 上屏后会变成每条 3 个设备像素宽，看起来像像素又被放大了一次。
+     * 图案由 {@code u_shadow} 在纵向栅条（格栅2.txt）和旋转荫罩（crt.txt shadow mask）之间切换。
+     * 配比取 Lottes 的 0.5 / 1.5（白场约压到 83%，就是荫罩本身的透光损失）。</p>
      *
-     * <p>辉光风格"特效前"时会先画进后处理的输入捕获而不是屏幕，见
-     * {@link #render()} 步骤 1c/2。</p>
+     * <p>玻璃桶形扭曲由 {@code u_warp} 单独控制，设置页可以只关扭曲、保留扫描线和格栅；
+     * 邻像素混合由 {@code u_mix} 控制：它既是开关也是强度系数 {@code k}（0 = 直通、不跑混合），
+     * 按设备像素在设计像素里的位置给左右/上下邻居加权，
+     * 横向始终参与、纵向只在格栅开着时参与；越靠边权重越大、中心几乎不混，k 随缩放归一化，
+     * 亮度守恒，只混色不加亮。k 的取值来自 {@link VideoSettings#mixK()}，设置页有一根可拖的滑条。</p>
      */
-    private void drawScanlines(double ox, double oy, double cw, double ch, double scale) {
-        VideoSettings.ScanlineShape shape = VideoSettings.scanlineShape();
-        // 整数倍缩放（2x=1280x720、3x=1920x1080…）要单独对齐：一个设计像素正好
-        // 铺满 px 个设备像素，黑条必须取整数像素高，否则 1.5 像素的线会被硬件
-        // 线性插值摊成两行半透明的灰，画面上就是深浅不一的横纹。
-        float px = (float) Math.rint(scale);
-        boolean snapped = px >= 2f && Math.abs(scale - px) < 0.02f;
-        if (snapped && shape == VideoSettings.ScanlineShape.JAGGED) {
-            drawJaggedScanlines(ox, oy, cw, ch, (int) px);
+    private ShaderProgram makeCrtShader() {
+        String vert =
+                "#version 120\n" +
+                "attribute vec2 a_position;\n" +
+                "attribute vec2 a_texCoord0;\n" +
+                "uniform mat4 u_projTrans;\n" +
+                "varying vec2 v_tex;\n" +
+                "void main() {\n" +
+                "  v_tex = a_texCoord0;\n" +
+                "  gl_Position = u_projTrans * vec4(a_position, 0.0, 1.0);\n" +
+                "}\n";
+        String frag =
+                "#version 120\n" +
+                "varying vec2 v_tex;\n" +
+                "uniform sampler2D u_texture;\n" +
+                "uniform vec2 u_res;\n" +
+                "uniform vec2 u_quad;\n" +
+                "uniform float u_scale;\n" +
+                "uniform float u_scan;\n" +
+                "uniform float u_grille;\n" +
+                "uniform float u_shadow;\n" +
+                "uniform float u_warp;\n" +
+                "uniform float u_mix;\n" +
+                "// 显像管玻璃的轻微桶形畸变：越靠边越向外鼓。\n" +
+                "vec2 Warp(vec2 pos) {\n" +
+                "  if (u_warp < 0.5) return pos;\n" +
+                "  pos = pos * 2.0 - 1.0;\n" +
+                "  pos *= vec2(1.0 + (pos.y * pos.y) * (1.0 / 64.0),\n" +
+                "              1.0 + (pos.x * pos.x) * (1.0 / 48.0));\n" +
+                "  return pos * 0.5 + 0.5;\n" +
+                "}\n" +
+                "// 扫描线：一个设计像素一行，行尾压暗一条设备像素线。\n" +
+                "float Scanline(vec2 pos) {\n" +
+                "  float line = max(1.0, floor(u_scale * 0.25 + 0.5));\n" +
+                "  float dev = fract(pos.y * u_res.y) * u_scale;\n" +
+                "  float edge = smoothstep(u_scale - line - 0.5, u_scale - line + 0.5, dev);\n" +
+                "  return 1.0 - 0.35 * u_scan * edge;\n" +
+                "}\n" +
+                "// 邻像素混合（古法抗锯齿）：权重按设备像素在设计像素里的位置算，亮度归一化。\n" +
+                "// 越靠像素边缘邻居权重越大，中心几乎不混，所以光是从边缘连续渗出去的，\n" +
+                "// 不会把整个放大像素染成一块；k 随缩放归一化，2x/3x 渗色量接近（横向始终有，纵向只在格栅开时参与）。\n" +
+                "vec3 MixTap(vec2 pos, vec2 off) {\n" +
+                "  return texture2D(u_texture, clamp(pos + off / u_res, 0.0, 1.0)).rgb;\n" +
+                "}\n" +
+                "vec3 Mix(vec2 pos) {\n" +
+                "  vec2 f = fract(pos * u_res) - 0.5;\n" +
+                "  float s = 2.0 * u_scale / (u_scale + 1.0);\n" +
+                "  float k = u_mix * s * s;\n" +
+                "  float cl = exp2(-k * (f.x + 1.0) * (f.x + 1.0));\n" +
+                "  float cr = exp2(-k * (f.x - 1.0) * (f.x - 1.0));\n" +
+                "  float cu = exp2(-k * (f.y + 1.0) * (f.y + 1.0)) * 0.5 * u_grille;\n" +
+                "  float cd = exp2(-k * (f.y - 1.0) * (f.y - 1.0)) * 0.5 * u_grille;\n" +
+                "  vec3 sum = MixTap(pos, vec2(0.0))\n" +
+                "           + MixTap(pos, vec2(-1.0, 0.0)) * cl + MixTap(pos, vec2(1.0, 0.0)) * cr\n" +
+                "           + MixTap(pos, vec2(0.0, -1.0)) * cu + MixTap(pos, vec2(0.0, 1.0)) * cd;\n" +
+                "  return sum / (1.0 + cl + cr + cu + cd);\n" +
+                "}\n" +
+                "// 孔径格栅：一条荧光条 = 一个设备像素，三条一组。\n" +
+                "// 不跟设计像素放大：游戏本身已经按 2x/3x 放大，格栅再按设计像素算\n" +
+                "// 会变成每条 3 个设备像素宽，看起来像像素又被放大了一次。\n" +
+                "// u_shadow = 1 时改用 crt.txt 的旋转荫罩：斜着走，一组 6 个设备像素、每条 2 像素宽。\n" +
+                "// 斜率不能写死：crt.txt 里输入像素是 6 设备像素，所以写 3 正好一行走一组；\n" +
+                "// 这里一个设计像素只有 u_scale 个设备像素，斜率要取 6/u_scale，一个设计像素行\n" +
+                "// 才刚好走满一组。写死 3 的话 3x 每行只走半组，奇偶设计行相位错开，看起来\n" +
+                "// 就是荫罩和像素对不齐。\n" +
+                "vec3 Grille(vec2 frag) {\n" +
+                "  float x = mod(frag.x, 3.0);\n" +
+                "  if (u_shadow > 0.5) x = mod(frag.x + frag.y * (6.0 / u_scale), 6.0) * 0.5;\n" +
+                "  float p = floor(x);\n" +
+                "  vec3 mask = vec3(0.5);\n" +
+                "  if (p < 1.0) mask.r = 1.5;\n" +
+                "  else if (p < 2.0) mask.g = 1.5;\n" +
+                "  else mask.b = 1.5;\n" +
+                "  return mix(vec3(1.0), mask, u_grille);\n" +
+                "}\n" +
+                "void main() {\n" +
+                "  vec2 pos = Warp(v_tex);\n" +
+                "  vec3 col;\n" +
+                "  if (max(abs(pos.x - 0.5), abs(pos.y - 0.5)) > 0.5) {\n" +
+                "    col = vec3(0.0);\n" +
+                "  } else {\n" +
+                "    col = u_mix > 0.001 ? Mix(pos) : texture2D(u_texture, pos).rgb;\n" +
+                "  }\n" +
+                "  col *= Scanline(pos);\n" +
+                "  col *= Grille(v_tex * u_quad);\n" +
+                "  gl_FragColor = vec4(col, 1.0);\n" +
+                "}\n";
+        ShaderProgram p = new ShaderProgram(vert, frag);
+        if (!p.isCompiled()) {
+            throw new GdxRuntimeException("CRT shader: " + p.getLog());
+        }
+        return p;
+    }
+
+    /**
+     * CRT 上屏：按当前 {@link VideoSettings.CrtFilter} 选扫描线 / 格栅。
+     * 滤镜关闭、或缩放太小（一个设计像素不足 2 个设备像素）时走直通路径。
+     */
+    private void drawCrt(double ox, double oy, double cw, double ch) {
+        VideoSettings.CrtFilter mode = VideoSettings.crtFilter();
+        float scale = (float) (cw / DESIGN_WIDTH);
+        if (crtShader == null || mode == VideoSettings.CrtFilter.OFF || scale < 2f) {
+            drawFrame(ox, oy, cw, ch);
             return;
         }
-        float period = snapped ? px : (float) Math.max(2.0, scale);
-        float line = snapped ? Math.max(1f, (float) Math.floor(px * 0.5f)) : period * 0.5f;
-        batch.enableBlending();
-        // 0.75 太闷：显像管的行间隙只是"这一行没被扫到"，不是一层黑纱，
-        // 压到 0.5 才既看得出横纹、又不把整个画面压成灰。
-        batch.setColor(0f, 0f, 0f, SCANLINE_DARK);
+        crtShader.bind();
+        crtShader.setUniformf("u_res", (float) DESIGN_WIDTH, (float) DESIGN_HEIGHT);
+        crtShader.setUniformf("u_quad", (float) cw, (float) ch);
+        crtShader.setUniformf("u_scale", scale);
+        crtShader.setUniformf("u_scan", mode.hasScanline() ? 1f : 0f);
+        crtShader.setUniformf("u_grille", mode.hasGrille() ? 1f : 0f);
+        crtShader.setUniformf("u_shadow",
+                VideoSettings.grilleStyle() == VideoSettings.GrilleStyle.SHADOW ? 1f : 0f);
+        crtShader.setUniformf("u_warp", VideoSettings.screenWarp() ? 1f : 0f);
+        crtShader.setUniformf("u_mix",
+                VideoSettings.bloom() ? (float) VideoSettings.mixK() : 0f);
+        batch.setShader(crtShader);
+        batch.disableBlending();
         batch.begin();
-        for (float y = period - line; y < ch; y += period) {
-            batch.draw(whitePixel, (float) ox, (float) (oy + ch - y - line), (float) cw, line);
-        }
+        batch.draw(frameTexture, (float) ox, (float) oy, (float) cw, (float) ch);
         batch.end();
-        batch.setColor(1f, 1f, 1f, 1f);
-    }
-
-    /**
-     * 锯齿扫描线：错位发生在<b>单个设计像素内部</b>（三个荧光条一格一格地错开），
-     * 不是跨好几个像素的大锯齿。
-     *
-     * <p>整屏只画一个四边形，靠一张 {@code 3 × period} 的循环纹理来表达图案：
-     * 横向三列正好对应 R/G/B 三个荧光条（和 {@link #makeGrilleTexture()} 的相位
-     * 对齐），每一列在自己的那一行画黑条。中间那列（绿）整体下移一行，
-     * 于是绿条在视觉上比红蓝高出 1 个设备像素——这就是真机荫栅的错位感。</p>
-     */
-    private void drawJaggedScanlines(double ox, double oy, double cw, double ch, int period) {
-        Texture tex = scanlineTexture(period);
-        if (tex == null) {
-            return;
-        }
-        batch.enableBlending();
-        batch.setColor(1f, 1f, 1f, 1f);
-        batch.begin();
-        // u2/v2 是"重复次数"（normalized uv 超过 1 时靠 Repeat 包裹），
-        // 3 宽 = 一个三色组，period 高 = 一个扫描周期，正好一个设备像素一格。
-        batch.draw(tex, (float) ox, (float) oy, (float) cw, (float) ch,
-                0f, 0f, (float) (cw / 3.0), (float) (ch / (double) period));
-        batch.end();
-    }
-
-    /** 锯齿扫描线的循环纹理：3 列（R/G/B）× period 行，绿列整体下移一格。 */
-    private Texture scanlineTexture(int period) {
-        if (scanlineTexture != null && scanlineTexPeriod == period) {
-            return scanlineTexture;
-        }
-        if (scanlineTexture != null) {
-            scanlineTexture.dispose();
-        }
-        int rows = Math.max(1, period / 2);
-        Pixmap p = new Pixmap(3, period, Pixmap.Format.RGBA8888);
-        p.setBlending(Pixmap.Blending.None);
-        p.setColor(0f, 0f, 0f, 0f);
-        p.fill();
-        p.setColor(0f, 0f, 0f, SCANLINE_DARK);
-        for (int col = 0; col < 3; col++) {
-            // 中间那列是绿色荧光条：黑条下移一行 → 绿条的亮区向上多出 1 像素
-            int shift = col == 1 ? 1 : 0;
-            for (int r = 0; r < rows; r++) {
-                p.drawPixel(col, (shift + r) % period);
-            }
-        }
-        scanlineTexture = new Texture(p, Pixmap.Format.RGBA8888, false);
-        scanlineTexture.setFilter(Texture.TextureFilter.Nearest, Texture.TextureFilter.Nearest);
-        scanlineTexture.setWrap(Texture.TextureWrap.Repeat, Texture.TextureWrap.Repeat);
-        p.dispose();
-        scanlineTexPeriod = period;
-        return scanlineTexture;
-    }
-
-    /**
-     * 孔径格栅的图案：三列分别是红、绿、蓝荧光条。
-     *
-     * <p>每一列不是纯色，而是"该通道 100%、另外两个通道 {@link #GRILLE_PASS}"的
-     * 增益值——配合乘法混合，就等价于逐通道调亮度，而不是把颜色盖上去。</p>
-     */
-    private static Texture makeGrilleTexture() {
-        Pixmap p = new Pixmap(3, 1, Pixmap.Format.RGBA8888);
-        p.setColor(1f, GRILLE_PASS, GRILLE_PASS, 1f);
-        p.drawPixel(0, 0);
-        p.setColor(GRILLE_PASS, 1f, GRILLE_PASS, 1f);
-        p.drawPixel(1, 0);
-        p.setColor(GRILLE_PASS, GRILLE_PASS, 1f, 1f);
-        p.drawPixel(2, 0);
-        Texture t = new Texture(p);
-        t.setFilter(Texture.TextureFilter.Nearest, Texture.TextureFilter.Nearest);
-        t.setWrap(Texture.TextureWrap.Repeat, Texture.TextureWrap.ClampToEdge);
-        p.dispose();
-        return t;
-    }
-
-    /**
-     * CRT 孔径格栅（屏幕空间）：每三个设备像素一组 R/G/B 荧光条。
-     *
-     * <p>用一张 3x1 的纹理横向 Repeat 平铺、一次 draw 画完：靠 alpha 混合把
-     * 另外两个通道压下去（红条抬高 R、压暗 G/B），看上去就是竖向的彩色细条，
-     * 而不是简单盖一层灰。条纹宽度 = 一个设计像素（至少 1 设备像素），所以
-     * 放大倍率越高，条带越接近真实荫栅的观感。</p>
-     *
-     * <p>与扫描线互不影响：扫描线是行、格栅是列，两个开关可以同时开。</p>
-     */
-    private void drawApertureGrille(double ox, double oy, double cw, double ch, double scale) {
-        if (grilleTexture == null) {
-            return;
-        }
-        // 栅距（一条荧光条占几个设备像素）按缩放整数倍区分：
-        //   3x（1920x1080）：1 设备像素 → 三色正好铺满一个设计像素，最像真机；
-        //   2x（1280x720）：2 不是 3 的倍数，只能取 1（三色跨 1.5 个设计像素）；
-        //   4x/6x 等：取 round(px/3)，让"一个三色组 ≈ 一个设计像素"的比例不随
-        //   分辨率漂移，否则屏幕上会冒出色带/摩尔纹。
-        float px = (float) Math.rint(scale);
-        boolean snapped = px >= 2f && Math.abs(scale - px) < 0.02f;
-        float stripePx = snapped ? Math.max(1f, Math.round(px / 3f)) : 1f;
-        double repeats = cw / (3.0 * stripePx);
-        // 乘法混合（dst = src * dst）：格栅做的是"给每个通道乘一个亮度系数"，
-        // 不是往上盖一层颜色。alpha 混合会把 R 推向 255 并压暗 G/B，观感偏"染色"；
-        // 乘法则是真按通道衰减，黑的地方仍然是黑。
         batch.setShader(null);
         batch.enableBlending();
-        batch.setBlendFunction(GL20.GL_DST_COLOR, GL20.GL_ZERO);
-        // 注意 batch.setColor 会把分量夹到 0..1，想"整体提亮补回挡光"是提不上去的；
-        // 亮度只能通过 GRILLE_PASS 调（挡得越少越亮、条纹越淡）。
-        batch.setColor(PHOSPHOR_R, PHOSPHOR_G, PHOSPHOR_B, 1f);
-        batch.begin();
-        batch.draw(grilleTexture, (float) ox, (float) oy, (float) cw, (float) ch,
-                0f, 0f, (float) repeats, 1f);
-        batch.end();
-        batch.setBlendFunction(GL20.GL_SRC_ALPHA, GL20.GL_ONE_MINUS_SRC_ALPHA);
-        batch.setColor(1f, 1f, 1f, 1f);
     }
 
 
@@ -597,10 +362,8 @@ public final class PixelGameView extends ApplicationAdapter {
             gestures.update(dt);
         }
 
-        // 0b) 画质设置可能在设置面板里被改过，逐帧对齐一次
-        if (appliedStyle != VideoSettings.style()) {
-            applyStyle(VideoSettings.style());
-        }
+        // 0b) 像素化/CRT 开关可能在设置面板里被改过，逐帧对齐纹理过滤
+        updateSampling();
 
         // 1) 界面推进（含过渡）
         long pu = profiling ? System.nanoTime() : 0;
@@ -633,9 +396,9 @@ public final class PixelGameView extends ApplicationAdapter {
             if (profiling && frameCount > 0) {
                 double f = frameCount;
                 System.out.println(String.format(
-                        "[prof] tick=%.2f ms（update %.2f + draw %.2f + 上传 %.2f）  blit=%.2f  辉光链=%.2f",
+                        "[prof] tick=%.2f ms（update %.2f + draw %.2f + 上传 %.2f）  CRT=%.2f",
                         profTick / 1e6 / f, profUpdate / 1e6 / f, profDraw / 1e6 / f,
-                        profUpload / 1e6 / f, profFrame / 1e6 / f, profVfx / 1e6 / f));
+                        profUpload / 1e6 / f, profFrame / 1e6 / f));
             }
             if (secs > 0) {
                 System.out.println(String.format("[smoke] 平均 %.2f FPS（%.2f ms/帧）",
@@ -654,49 +417,27 @@ public final class PixelGameView extends ApplicationAdapter {
      * 同步纹理采样方式：孔径格栅开 = 双线性平滑放大（像素浸染），否则按 F7 的
      * 像素化开关走 Nearest/Linear。改动只在状态变化时执行，避免每帧重设 GL 状态。
      */
+    /** 同步纹理采样方式：F7 像素化开关决定 Nearest/Linear。 */
     private void updateSampling() {
-        boolean smooth = screens.isApertureGrilleEnabled();
         boolean pixelated = VideoSettings.pixelated();
-        if (smooth == smoothScale && pixelated == appliedPixelated) {
+        if (pixelated == appliedPixelated) {
             return;
         }
-        smoothScale = smooth;
         appliedPixelated = pixelated;
-        Texture.TextureFilter f = (smoothScale || !appliedPixelated)
-                ? Texture.TextureFilter.Linear
-                : Texture.TextureFilter.Nearest;
+        Texture.TextureFilter f = pixelated
+                ? Texture.TextureFilter.Nearest
+                : Texture.TextureFilter.Linear;
         if (frameTexture != null) {
             frameTexture.setFilter(f, f);
         }
-        if (grilleTexture != null) {
-            // 格栅也一起柔化：3 列红绿蓝在双线性采样下互相渗色，才是"浸染"，
-            // 否则是一排硬邦邦的彩色竖线压在糊掉的画面上。
-            grilleTexture.setFilter(f, f);
-        }
-        if (vfxManager != null) {
-            vfxManager.setEffectTextureParams(
-                    com.badlogic.gdx.graphics.Texture.TextureWrap.ClampToEdge,
-                    com.badlogic.gdx.graphics.Texture.TextureWrap.ClampToEdge,
-                    f, f);
-        }
-    }
-
-    private void applyStyle(VideoSettings.Style style) {
-        appliedStyle = style;
     }
 
     private void onViewportChanged() {
         pixelScale.updateViewport(Gdx.graphics.getWidth(), Gdx.graphics.getHeight());
         double scale = pixelScale.effectiveScale();
         double cw = DESIGN_WIDTH * scale;
-        // 模糊半径 1.5 屏幕像素（原 GaussianBlur(3) 的一半，用户口径），换算成 uv
-        blurRadiusUv = (float) (1.5 / cw);
         screens.setViewport(Gdx.graphics.getWidth(), Gdx.graphics.getHeight(),
                 cw, DESIGN_HEIGHT * scale);
-        // 后处理链始终保持设计分辨率（见 create() 里的性能说明），窗口变化不用跟着改
-        if (vfxManager != null && vfxManager.getWidth() != DESIGN_WIDTH) {
-            vfxManager.resize(DESIGN_WIDTH, DESIGN_HEIGHT);
-        }
     }
 
     @Override
@@ -740,26 +481,8 @@ public final class PixelGameView extends ApplicationAdapter {
         if (batch != null) {
             batch.dispose();
         }
-        if (whitePixel != null) {
-            whitePixel.dispose();
-        }
-        if (scanlineTexture != null) {
-            scanlineTexture.dispose();
-        }
-        if (grilleTexture != null) {
-            grilleTexture.dispose();
-        }
-        if (beamShader != null) {
-            beamShader.dispose();
-        }
-        if (glowShader != null) {
-            glowShader.dispose();
-        }
-        if (bloomEffect != null) {
-            bloomEffect.dispose();
-        }
-        if (vfxManager != null) {
-            vfxManager.dispose();
+        if (crtShader != null) {
+            crtShader.dispose();
         }
     }
 
@@ -1033,15 +756,6 @@ public final class PixelGameView extends ApplicationAdapter {
     }
 
     // ------------------------------------------------------------------ 资源小件
-
-    private static Texture makeWhitePixel() {
-        Pixmap pm = new Pixmap(1, 1, Pixmap.Format.RGBA8888);
-        pm.setColor(1f, 1f, 1f, 1f);
-        pm.fill();
-        Texture t = new Texture(pm);
-        pm.dispose();
-        return t;
-    }
 
     /**
      * 辉光/模糊着色器：9+1 tap 高斯（±3 屏幕像素内三圈），可带亮度阈值。

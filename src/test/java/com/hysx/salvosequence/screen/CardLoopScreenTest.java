@@ -46,10 +46,13 @@ class CardLoopScreenTest {
         ShipArtStore.useDirectory(Files.createTempDirectory("hull-cardloop-test"));
     }
 
-    /** 设置是静态状态：扫描线时机改过之后要还原，别影响别的测试。 */
+    /** 设置是静态状态：CRT 开关改过之后要还原，别影响别的测试。 */
     @AfterEach
     void resetVideoSettings() {
-        VideoSettings.setScanlineOrder(VideoSettings.ScanlineOrder.AFTER_EFFECT);
+        VideoSettings.setCrtFilter(VideoSettings.CrtFilter.SCANLINE_GRILLE);
+        VideoSettings.setGrilleStyle(VideoSettings.GrilleStyle.APERTURE);
+        VideoSettings.setScreenWarp(false);
+        VideoSettings.setBloom(true);
     }
 
     private static CanvasBuffer newBuffer() {
@@ -392,41 +395,107 @@ class CardLoopScreenTest {
     }
 
     @Test
-    void theEscapeSettingsPanelOffersAScanlineTimingRow() {
+    void theEscapeSettingsPanelOffersACrtRow() {
+        VideoSettings.setCrtFilter(VideoSettings.CrtFilter.SCANLINE_GRILLE);
         CardLoopScreen screen = started();
         assertEquals(Run.Stage.MAP, screen.run().stage());
         press(screen, "ESCAPE");
         CanvasBuffer buffer = newBuffer();
         screen.draw(buffer);
-        assertTrue(mentions(buffer.texts(), "扫描线："), "设置面板要有扫描线开关");
-        VideoSettings.ScanlineOrder start = VideoSettings.scanlineOrder();
-        String startLabel = start == VideoSettings.ScanlineOrder.BEFORE_EFFECT ? "特效前" : "特效后";
         assertTrue(buffer.texts().stream()
-                        .anyMatch(t -> t.content().startsWith("扫描线时机：")
-                                && t.content().endsWith(startLabel)),
-                "时机行显示当前值");
-        assertTrue(buffer.texts().stream()
-                        .anyMatch(t -> t.content().startsWith("扫描线形状：")),
-                "设置面板要有扫描线形状");
+                        .anyMatch(t -> t.content().startsWith("CRT 滤镜：")),
+                "设置面板要有 CRT 滤镜行");
 
-        // 0=继续 1=音乐 2=音效 3=扫描线 4=扫描线形状 5=扫描线时机
-        for (int i = 0; i < 5; i++) {
+        // 0=继续 1=音乐 2=音效 3=CRT
+        for (int i = 0; i < 3; i++) {
             press(screen, "DOWN");
         }
         press(screen, "ENTER");
-        VideoSettings.ScanlineOrder flipped = start == VideoSettings.ScanlineOrder.BEFORE_EFFECT
-                ? VideoSettings.ScanlineOrder.AFTER_EFFECT
-                : VideoSettings.ScanlineOrder.BEFORE_EFFECT;
-        assertEquals(flipped, VideoSettings.scanlineOrder(), "回车切换扫描线时机");
+        assertEquals(VideoSettings.CrtFilter.OFF, VideoSettings.crtFilter(), "回车关掉 CRT");
         CanvasBuffer after = newBuffer();
         screen.draw(after);
         assertTrue(after.texts().stream()
-                        .anyMatch(t -> t.content().startsWith("扫描线时机：")
-                                && t.content().endsWith(flipped == VideoSettings.ScanlineOrder.BEFORE_EFFECT
-                                ? "特效前" : "特效后")),
+                        .anyMatch(t -> t.content().startsWith("CRT 滤镜：")
+                                && t.content().endsWith("关")),
                 "设置行要显示当前值");
         press(screen, "ENTER");
-        assertEquals(start, VideoSettings.scanlineOrder(), "再回车切回原值");
+        assertEquals(VideoSettings.CrtFilter.SCANLINE, VideoSettings.crtFilter(),
+                "再回车进入扫描线模式");
+    }
+
+    @Test
+    void f2OpensTheBackdropMenuInsteadOfCyclingPresets() {
+        CardLoopScreen screen = started();
+        press(screen, "F2");
+        CanvasBuffer buffer = newBuffer();
+        screen.draw(buffer);
+        assertTrue(mentions(buffer.texts(), "背景"), "F2 要弹出背景菜单");
+        assertTrue(mentions(buffer.texts(), "体积星云"), "菜单要逐行列出场景名");
+        assertTrue(mentions(buffer.texts(), "机位"), "行尾要显示该场景的机位数");
+
+        // Esc 还原：菜单收起，列表不再画
+        press(screen, "ESCAPE");
+        CanvasBuffer after = newBuffer();
+        screen.draw(after);
+        assertFalse(mentions(after.texts(), "体积星云"), "Esc 之后菜单收起");
+    }
+
+    @Test
+    void theMixSliderFollowsTheKeyboardAndThePointer() {
+        VideoSettings.resetMixK();
+        CardLoopScreen screen = started();
+        press(screen, "ESCAPE");
+        // 0=继续 1=音乐 2=音效 3=CRT 4=格栅图案 5=屏幕扭曲 6=混合柔化 7=混合 K（滑条）
+        for (int i = 0; i < 7; i++) {
+            press(screen, "DOWN");
+        }
+        press(screen, "RIGHT");
+        assertEquals(1.05, VideoSettings.mixK(), 1e-6, "右键按 0.05 步进调大");
+        press(screen, "LEFT");
+        press(screen, "LEFT");
+        assertEquals(0.95, VideoSettings.mixK(), 1e-6, "左键按步进调小");
+        press(screen, "ENTER");
+        assertEquals(1.0, VideoSettings.mixK(), 1e-6, "回车把滑条归位到 1.00");
+
+        CanvasBuffer buffer = newBuffer();
+        screen.draw(buffer);
+        assertTrue(mentions(buffer.texts(), "混合 K："), "设置面板要有混合 K 滑条行");
+
+        // 轨道 x=290..386、第 7 行横幅 y=184..204：按住拖过两端，量程两端要钳住。
+        Recorder recorder = new Recorder();
+        screen.collectHotspots(recorder);
+        recorder.press(320, 194);
+        recorder.dragTo(420, 194);
+        assertEquals(VideoSettings.MIX_K_MAX, VideoSettings.mixK(), 1e-6, "拖到右端是 3.00");
+        recorder.dragTo(260, 194);
+        assertEquals(VideoSettings.MIX_K_MIN, VideoSettings.mixK(), 1e-6, "拖到左端是 0.25");
+        VideoSettings.resetMixK();
+    }
+
+    @Test
+    void settingsHotspotsLineUpWithTheDrawnRows() {
+        CardLoopScreen screen = started();
+        press(screen, "ESCAPE");
+        VideoSettings.setScreenWarp(true);
+        Recorder recorder = new Recorder();
+        screen.collectHotspots(recorder);
+
+        // 面板 268x340，y=10，行高 20：格栅图案(4) 的横幅在 124..144，屏幕扭曲(5) 在 144..164。
+        // 以前绘制用 h=300，热区用 h=340，整排热区比画出来的高 20px，点中间会命中上一行。
+        recorder.click(320, 134);
+        assertEquals(VideoSettings.GrilleStyle.SHADOW, VideoSettings.grilleStyle(),
+                "点格栅图案那一行应当切图案");
+        recorder.click(320, 154);
+        assertFalse(VideoSettings.screenWarp(), "点屏幕扭曲那一行应当只关扭曲");
+        assertEquals(VideoSettings.CrtFilter.SCANLINE_GRILLE, VideoSettings.crtFilter(),
+                "没有误点到 CRT");
+
+        CanvasBuffer buffer = newBuffer();
+        screen.draw(buffer);
+        assertTrue(buffer.texts().stream()
+                        .anyMatch(t -> t.content().startsWith("屏幕扭曲：")
+                                && t.content().endsWith("关")),
+                "面板上的值要和热区结果一致");
     }
 
     @Test

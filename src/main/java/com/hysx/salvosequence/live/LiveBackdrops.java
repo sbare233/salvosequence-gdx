@@ -1,5 +1,8 @@
 package com.hysx.salvosequence.live;
 
+import com.hysx.salvosequence.live.nebula.AlroNebulaLive;
+import com.hysx.salvosequence.live.nebula.CrabNebulaLive;
+import com.hysx.salvosequence.live.nebula.IntergalacticCloudsLive;
 import com.hysx.salvosequence.live.nebula.NebulaLive;
 import com.hysx.salvosequence.live.star.StarLive;
 
@@ -12,9 +15,12 @@ import com.hysx.salvosequence.live.star.StarLive;
 public final class LiveBackdrops {
 
     /** 场景 id，稳定、可存配置。 */
-    public static final String[] IDS = {"nebula", "star", "gleba", "pulsar", "blackhole"};
-    private static final String[] NAMES_ZH = {"星云", "恒星", "星球", "脉冲星", "黑洞"};
-    private static final String[] NAMES_EN = {"NEBULA", "STAR", "PLANET", "PULSAR", "BLACK HOLE"};
+    public static final String[] IDS = {"nebula", "star", "gleba", "pulsar", "blackhole",
+            "intergalactic", "crab", "alro"};
+    private static final String[] NAMES_ZH = {"星云", "恒星", "星球", "脉冲星", "黑洞",
+            "星际云", "蟹状星云", "体积星云"};
+    private static final String[] NAMES_EN = {"NEBULA", "STAR", "PLANET", "PULSAR", "BLACK HOLE",
+            "INTERGALACTIC", "CRAB", "VOLUMETRIC"};
 
     private static LiveBackdrop[] scenes = new LiveBackdrop[IDS.length];
     private static int[][] lastFrame = new int[IDS.length][];
@@ -37,6 +43,17 @@ public final class LiveBackdrops {
 
     public static com.hysx.salvosequence.gleba.gen.PlanetTheme planetTheme() {
         return planetTheme;
+    }
+
+    /** 星球场景上的巨构（原始 / 巢都 / 矿业星 / 加速器 / 太空电梯），下标同 PlanetBuild。 */
+    private static int planetBuild;
+
+    public static void setPlanetBuild(int index) {
+        planetBuild = Math.floorMod(index, com.hysx.salvosequence.gleba.gen.PlanetBuild.count());
+    }
+
+    public static int planetBuild() {
+        return planetBuild;
     }
 
     /** 当前生效的机位（战斗开始时抽的那条），供调试键/工坊显示。 */
@@ -250,6 +267,10 @@ public final class LiveBackdrops {
             // 亮度要压得更低才不会透过半透明棋盘跟棋子抢读：66% 还能看出云的结构。
             // 棋盘更透之后星云透上来的比重变大，压暗相应回落到 56，保持原来那层"暗云"。
             case "nebula" -> 56;
+            case "intergalactic" -> 70;
+            case "crab" -> 90;
+            // 体积星云本身偏暗（深蓝底 + 局部亮云），压暗太多会整片变黑，先按 78 试。
+            case "alro" -> 78;
             // 星球那张有亮面的球体，压到 70 仍然会在棋盘后面晃眼，58 才退成"远景"。
             // 星球没有黑洞天空当第二光源后整颗都暗了，压暗回到 88 才读得出大气与夜面。
             case "gleba" -> 88;
@@ -257,6 +278,14 @@ public final class LiveBackdrops {
             case "blackhole" -> 94;
             default -> 70;
         };
+    }
+
+    /** 调试：最近一次渲染出的原始帧（过滤前），用来判断杂色来自着色器还是像素滤镜。 */
+    public static int[] lastRaw(int index) {
+        if (index < 0 || index >= lastFrame.length) {
+            return null;
+        }
+        return lastFrame[index];
     }
 
     public static int[] frame(int index, double time) {
@@ -276,6 +305,9 @@ public final class LiveBackdrops {
                     case "gleba" -> new GlebaLiveBackdrop();
                     case "pulsar" -> new PulsarLiveBackdrop();
                     case "blackhole" -> new BlackHoleLiveBackdrop();
+                    case "intergalactic" -> new IntergalacticLiveBackdrop();
+                    case "crab" -> new CrabLiveBackdrop();
+                    case "alro" -> new AlroLiveBackdrop();
                     default -> null;
                 };
             }
@@ -422,6 +454,9 @@ public final class LiveBackdrops {
                 case "gleba" -> new GlebaLiveBackdrop();
                 case "pulsar" -> new PulsarLiveBackdrop();
                 case "blackhole" -> new BlackHoleLiveBackdrop();
+                case "intergalactic" -> new IntergalacticLiveBackdrop();
+                case "crab" -> new CrabLiveBackdrop();
+                case "alro" -> new AlroLiveBackdrop();
                 default -> null;
             };
         }
@@ -515,6 +550,190 @@ public final class LiveBackdrops {
         @Override
         public void setCamera(double yaw, double pitch, double dist) {
             live.setCamera(yaw, pitch, dist);
+        }
+
+        @Override
+        public void dispose() {
+            live.dispose();
+        }
+    }
+
+    /** 星际云：sebastien durand 的螺旋噪声云，和原版星云并列。 */
+    private static final class IntergalacticLiveBackdrop implements LiveBackdrop {
+        private final IntergalacticCloudsLive live = new IntergalacticCloudsLive();
+
+        @Override
+        public String id() {
+            return "intergalactic";
+        }
+
+        @Override
+        public String nameZh() {
+            return "星际云";
+        }
+
+        @Override
+        public String nameEn() {
+            return "INTERGALACTIC";
+        }
+
+        @Override
+        public int[] frame(double time) {
+            live.setDriftEnabled(driftEnabled);
+            return live.render(time);
+        }
+
+        @Override
+        public Object params() {
+            return null;
+        }
+
+        @Override
+        public void orbit(double dx, double dy) {
+            live.orbit(dx, dy);
+        }
+
+        @Override
+        public void zoom(double notches) {
+            live.zoom(notches);
+        }
+
+        @Override
+        public double[] camera() {
+            return live.camera();
+        }
+
+        @Override
+        public void setCamera(double yaw, double pitch, double dist) {
+            live.setCamera(yaw, pitch, dist);
+        }
+
+        @Override
+        public void setLens(double fov) {
+            live.setLens((float) fov);
+        }
+
+        @Override
+        public void dispose() {
+            live.dispose();
+        }
+    }
+
+    /** 蟹状星云：Duke 的超新星遗迹，70 步 raymarch。 */
+    private static final class CrabLiveBackdrop implements LiveBackdrop {
+        private final CrabNebulaLive live = new CrabNebulaLive();
+
+        @Override
+        public String id() {
+            return "crab";
+        }
+
+        @Override
+        public String nameZh() {
+            return "蟹状星云";
+        }
+
+        @Override
+        public String nameEn() {
+            return "CRAB";
+        }
+
+        @Override
+        public int[] frame(double time) {
+            live.setDriftEnabled(driftEnabled);
+            return live.render(time);
+        }
+
+        @Override
+        public Object params() {
+            return null;
+        }
+
+        @Override
+        public void orbit(double dx, double dy) {
+            live.orbit(dx, dy);
+        }
+
+        @Override
+        public void zoom(double notches) {
+            live.zoom(notches);
+        }
+
+        @Override
+        public double[] camera() {
+            return live.camera();
+        }
+
+        @Override
+        public void setCamera(double yaw, double pitch, double dist) {
+            live.setCamera(yaw, pitch, dist);
+        }
+
+        @Override
+        public void setLens(double fov) {
+            live.setLens((float) fov);
+        }
+
+        @Override
+        public void dispose() {
+            live.dispose();
+        }
+    }
+
+    /** 体积星云：al-ro 的 gyroid 气壳 + 大气散射，72 步 raymarch，光沿太阳方向再步进一次。 */
+    private static final class AlroLiveBackdrop implements LiveBackdrop {
+        private final AlroNebulaLive live = new AlroNebulaLive();
+
+        @Override
+        public String id() {
+            return "alro";
+        }
+
+        @Override
+        public String nameZh() {
+            return "体积星云";
+        }
+
+        @Override
+        public String nameEn() {
+            return "VOLUMETRIC";
+        }
+
+        @Override
+        public int[] frame(double time) {
+            live.setDriftEnabled(driftEnabled);
+            return live.render(time);
+        }
+
+        @Override
+        public Object params() {
+            // 体积星云有配色档位（冷调 / 原版），工坊和 F2 菜单都靠它读写
+            return live.params();
+        }
+
+        @Override
+        public void orbit(double dx, double dy) {
+            live.orbit(dx, dy);
+        }
+
+        @Override
+        public void zoom(double notches) {
+            live.zoom(notches);
+        }
+
+        @Override
+        public double[] camera() {
+            return live.camera();
+        }
+
+        @Override
+        public void setCamera(double yaw, double pitch, double dist) {
+            live.setCamera(yaw, pitch, dist);
+        }
+
+        @Override
+        public void setLens(double fov) {
+            live.setLens((float) fov);
         }
 
         @Override
@@ -720,9 +939,15 @@ public final class LiveBackdrops {
                 started = true;
             } else if (!started) {
                 started = true;
+                planet.params.build = planetBuild;
                 planet.regen();
                 planet.setSun(sunAzimuth, 16f);
                 reapplyRings();
+            } else if (planet.params.build != planetBuild) {
+                // 换巨构不用重新生成地形：着色器的地表改造和轨道几何都是每帧现算的，
+                // 但矿业星的坑轴是在 regen 里掷的，所以还是走一次 regen（气态星球那次是空跑）
+                planet.params.build = planetBuild;
+                planet.regen();
             }
             // update() 是"问生成线程好了没 + 传纹理"的地方，生成中也要调，
             // 否则永远等不到 isGenerating() 变 false

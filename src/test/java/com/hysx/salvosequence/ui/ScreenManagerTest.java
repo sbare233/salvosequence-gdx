@@ -1,13 +1,14 @@
 package com.hysx.salvosequence.ui;
 
 import com.hysx.salvosequence.core.CanvasBuffer;
+import com.hysx.salvosequence.screen.ScreenContext;
 import org.junit.jupiter.api.Test;
 
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 /**
- * 界面管理器的两条全局约定：返回键一直画得出来、也点得到；触摸模式下轻点不建立悬浮。
+ * 界面管理器的两条全局约定：标题页不摆返回键（菜单里已有「退出」）、局内界面仍有一枚；触摸模式下轻点不建立悬浮。
  *
  * <p>这里不碰 Graphics：{@link ScreenManager} 的绘制只往 {@link CanvasBuffer} 里画，
  * 指针换算本来就守了 {@code Gdx.app == null}，所以能在无头环境里跑。</p>
@@ -15,24 +16,33 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 final class ScreenManagerTest {
 
     @Test
-    void everyScreenCarriesABackButton() {
+    void theTitleScreenShipsNoBackButtonBecauseItsMenuHasQuit() {
         ScreenManager screens = new ScreenManager();
         CanvasBuffer buffer = new CanvasBuffer(640, 360);
 
         screens.draw(buffer);
 
-        assertTrue(buffer.texts().stream()
+        assertFalse(buffer.texts().stream()
                         .anyMatch(run -> run.content().equals("返回") || run.content().equals("BACK")),
-                "返回键的标签应该画在缓冲里");
+                "标题页不再画返回键（菜单里的「退出」就够了）");
+        assertFalse(screens.mouseMoved(28, 344), "左下角也不该再有返回热区");
     }
 
     @Test
-    void theBackButtonIsTheBottomLeftHotspot() {
+    void theLoopScreenStillCarriesTheBackButton() {
         ScreenManager screens = new ScreenManager();
+        screens.go(ScreenContext.Target.CARD);
+        // 过渡是淡出淡入，推进过半秒界面才真正换过去
+        screens.update(0.5);
 
+        CanvasBuffer buffer = new CanvasBuffer(640, 360);
+        screens.draw(buffer);
+
+        assertTrue(buffer.texts().stream()
+                        .anyMatch(run -> run.content().equals("返回") || run.content().equals("BACK")),
+                "局内界面仍要有返回键");
         // 左下角返回键的矩形是 6,334 48x20（设计坐标 y 向下）
         assertTrue(screens.mouseMoved(28, 344), "指针落在返回键上应该命中热区");
-        assertFalse(screens.mouseMoved(600, 40), "右上角空白处不该有热区");
     }
 
     @Test
