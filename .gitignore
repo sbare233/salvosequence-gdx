@@ -1,3 +1,8 @@
 target/
+gen/
+dist/
+backup/
+android/
+.tmp/
 *.log
 drag-trace.txt
